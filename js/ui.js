@@ -10,6 +10,9 @@ define(["jquery"], function($) {
 		},
 		clear: function() {
 			$('.row').remove();
+			$('#titleInput')
+				.parents('.clearfix')
+				.removeClass('error');
 			$('.topbar a[href!="#"]').remove();
 		},
 		display: function(form, label, value) {

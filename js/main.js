@@ -16,19 +16,41 @@ String.prototype.format = function() {
     return s;
 };
 
-require(["jquery", "jquery.dateFormat", "ui", "underscore", "countries", 'goog!visualization,1,packages:[corechart,geochart]'], function($, dateFormat, ui, _, countries) {
+require(["jquery", 
+		"jquery.dateFormat", 
+		"ui", 
+		"underscore", 
+		"countries", 
+		"bootstrap-alerts",
+		"bootstrap-scrollspy",
+		"jquery.xdomainajax",
+		'goog!visualization,1,packages:[corechart,geochart]'
+	], function($, dateFormat, ui, _, countries) {
     $(function() {
+        $('#clear').click(function(){
+			$('#titleInput').val('');
+			ui.clear();
+			ui.status();
+		});
         $('#analyze').click(function(){
 			ui.clear();
 			var sec, form;
 			var input = $('#titleInput').val();
 			if(input) {
-				ui.status("Loading overview...");
+				ui.status("Querying toolserver...");
 				var url = "http://toolserver.org/~sonet/api.php?lang=en&article="
 					+ encodeURI(input)
 					+ "&editors&anons&callback=?"
 				$.getJSON(url, function(data){
-					ui.status();
+					if(data.error) {
+						$('#titleInput')
+							.parents('.clearfix')
+							.addClass('error');
+						ui.status(data.error);
+						return;
+					} else {
+						ui.status();
+					}
 					sec = ui.section("Overview");
 					form = ui.form(sec);
 					ui.display(form, 'Created', "{0} by {1}".format($.format.date(new Date(data.first_edit.timestamp * 1000), "yyyy-MM-dd hh:mm:ss"), data.first_edit.user));
@@ -67,6 +89,45 @@ require(["jquery", "jquery.dateFormat", "ui", "underscore", "countries", 'goog!v
 					geoChart.draw(table);
 					form = ui.form(sec);
 					ui.textarea(form, 'Anonymous grouped by country', geoCount.join('\n'));
+
+					url = "http://en.wikipedia.org/w/api.php?action=query&prop=info&format=json&callback=?&titles="
+						+ encodeURI(input)
+					ui.status("Querying en.wikipedia.org...")
+					$.getJSON(url, function(data){
+						ui.status();
+						var page = _.first(_.values(data.query.pages));
+						var revid = page.lastrevid;
+						var pageid = page.pageid;
+						console.log(page);
+						url = "http://en.collaborativetrust.com/WikiTrust/RemoteAPI?method=wikimarkup&pageid={0}&revid={1}".format(pageid, revid);
+						ui.status("Querying WikiTrust...");
+						$.get(url, function(res){
+							ui.status();
+							var pattern = /{{#t:[^{}]*}}/gm;
+							var tokens = res.responseText.match(pattern);
+							var survivors = _.map(tokens, function(token) {
+								return token.replace("{{", "").replace("}}", "").split(",")[2];
+							});
+
+							sec = ui.section("Survivors");
+							table = new google.visualization.DataTable();
+							table.addColumn('string', 'Region');
+							table.addColumn('number', 'Count');
+							geoCount = _.sortBy(_.map(geoData, function(list, key) {
+								var num = _.filter(list, function(item) {
+									return _.include(survivors, item[0]);
+								});
+								return [key, _.size(num)];
+						   	}), function(num){return num[1]});
+							geoCount.reverse();
+							table.addRows(geoCount);
+							geoChart = new google.visualization.GeoChart(_.first(ui.div(sec, "geoChart2")));
+							geoChart.draw(table);
+							form = ui.form(sec);
+							ui.textarea(form, 'Anonymous survivors grouped by country', geoCount.join('\n'));
+						});
+					});
+
 
 				});
 			// TODO get users
