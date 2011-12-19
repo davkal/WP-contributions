@@ -24,6 +24,19 @@ require(["jquery",
 		"jquery.xdomainajax",
 		"app"
 	], function($, _, Backbone, ba, bs, jx, app) {
+
+		_.mixin({
+			extract: function(obj, list) {
+				var ret = {};
+				_.each(obj, function(val, key) {
+					if(_.include(list, key)) {
+						ret[key] = val;
+					}
+				});
+				return ret;
+			}
+		});
+
 		app.init();
 		$('.topbar').scrollSpy();
 });
