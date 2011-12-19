@@ -3,8 +3,13 @@ define(["jquery",
 		"underscore", 
 		"backbone", 
 		"countries", 
+		'async!http://maps.google.com/maps/api/js?sensor=false',
 		'goog!visualization,1,packages:[corechart,geochart]'
 	], function($, dateFormat, _, Backbone, countries) {
+
+		window.c = function() {
+			console.log(arguments);
+		};
 
 		var countryList = _.pluck(countries.list, 'name');
 		function countrify(country) {
@@ -21,6 +26,27 @@ define(["jquery",
 			return country;
 		}
 
+		function checkLocation(text, model) {
+			var p = /latd=(\d+) ?\|latm=(\d+) ?\|lats=(\d+) ?\|longd=(\d+) ?\|longm=(\d+) ?\|longs=(\d+)/;
+			var match = text.match(p);
+			console.log(match);
+			if(match && match.length == 7) {
+				var loc = {
+					latitude: parseInt(match[1]) + (parseInt(match[2]) * 60 + parseInt(match[3])) / 3600,
+					longitude: parseInt(match[4]) + (parseInt(match[5]) * 60 + parseInt(match[6])) / 3600
+				};
+				model.set({location: loc});
+			} else {
+				console.log("No match for geotag.");
+			}
+		}
+
+		window.Article = new Backbone.Model;
+		window.Authors = new Backbone.Collection;
+		window.Bots = new Backbone.Collection;
+		window.Locations = new Backbone.Collection;
+		window.Revisions = new Backbone.Collection;
+
 		window.SectionView = Backbone.View.extend({
 			initialize: function() {
 				this.id = this.id || this.title.toLowerCase();
@@ -34,8 +60,10 @@ define(["jquery",
 			display: function(label, value) {
 				this.form.append('<div class="clearfix"><label>' + label + '</label><div class="input"><p>' + value + '</p></div></div>');
 			},
-			textarea: function(label, value) {
-				this.form.append('<div class="clearfix"><label>' + label + '</label><div class="input"><textarea class="xlarge" rows="6">' + value + '</textarea></div></div>');
+			textarea: function(label, value, rows) {
+				rows = rows || 8;
+				this.form.append('<div class="clearfix"><label>{0}</label><div class="input"><textarea class="xlarge" rows="{1}">{2}</textarea></div></div>'
+					.format(label, rows, value));
 			},
 			header: function() {
 				return '<div class="page-header"><h1>{0}</h1></div>'.format(this.title);
@@ -79,6 +107,11 @@ define(["jquery",
 
 					// adding all editors
 					_.each(data.editors, function(obj, name) {
+						if(name.toLowerCase().endsWith('bot')) {
+							Bots.add({
+								id: name
+							});
+						}
 						Authors.add({
 							id: name,
 							count: obj.all,
@@ -129,29 +162,54 @@ define(["jquery",
 					this.display('Contributors', "{0} users and unique IPs".format(m.get('editor_count')));
 				}
 				this.display("Last edited", m.get('touched'));
-
 				if(_.size(Authors)) {
 					this.column(2);
 					var located = [];
 					var editors = [];
-					var bots = [];
 					var name;
 					Authors.each(function(author) {
 						name = author.id;
-						if(name.toLowerCase().endsWith('bot')) {
-							bots.push(name);
-						}
 						if(author.get('location')) {
 							located.push(name);
 						}
 						editors.push(name);
 					});
 					this.textarea('Contributors ({0})'.format(_.size(editors)), editors.join('\n'));
-					this.textarea('Bots ({0})'.format(_.size(bots)), bots.join('\n'));
+					this.textarea('Content ({0})'.format(Article.get('length')), Article.get('text'));
 					this.column(3);
 					this.textarea('Located ({0})'.format(_.size(located)), located.join('\n'));
 				}
 
+				return this;
+			}
+		});
+
+		window.LocationView = SectionView.extend({
+			title: "Article Location",
+			id: "location",
+			renderMap: function(loc) {
+				var myLatlng = new google.maps.LatLng(loc.latitude, loc.longitude);
+				var myOptions = {
+					zoom: 1,
+					disableDefaultUI: true,
+					mapTypeId: google.maps.MapTypeId.ROADMAP,
+					center: myLatlng
+				};
+				var map = new google.maps.Map(this.div("map_canvas"), myOptions);
+				var myMarker = new google.maps.Marker({
+					map: map,
+					position: myLatlng
+				});
+			},
+			render: function() {
+				var loc = Article.get('location');
+				if(loc) {
+					this.row(['span-two-thirds', 'span-one-third']);
+					this.renderMap(loc);
+					this.column(2);
+					this.display('Latitude', loc.latitude);
+					this.display('Longitude', loc.longitude);
+				}
 				return this;
 			}
 		});
@@ -248,7 +306,13 @@ define(["jquery",
 				this.input
 					.parents('.clearfix')
 					.removeClass('error');
-				this.nav.children('a[href!="#"]').remove();
+				$('a[href!="#"]', this.nav).remove();
+
+				Article.clear({silent: true});
+				Authors.reset();
+				Bots.reset();
+				Revisions.reset();
+				Locations.reset();
 			},
 			link: function(sec) {
 				if(!$('a[href="#{0}"]'.format(sec.id), this.nav).length) {
@@ -263,8 +327,9 @@ define(["jquery",
 				App.status(text);
 			}, 
 			analyze: function(input) {
+				this.clear();
 				var me = this;
-				var url = "http://en.wikipedia.org/w/api.php?action=query&prop=info&format=json&redirects&callback=?&titles="
+				var url = "http://en.wikipedia.org/w/api.php?action=query&prop=info&format=json&redirects&callback=?&export&titles="
 					+ encodeURI(input);
 				App.status("Querying en.wikipedia.org...");
 				$.getJSON(url, function(data){
@@ -275,19 +340,21 @@ define(["jquery",
 					}
 					App.status("Loaded article info.");
 
-					window.Article = new Backbone.Model;
-					window.Authors = new Backbone.Collection;
-					window.Locations = new Backbone.Collection;
-					window.Revisions = new Backbone.Collection;
-
 					var page = _.first(_.values(pages));
 					Article.set(page);
+					var xml = $.parseXML(data.query.export['*']);
+					var text = $(xml).find('text').text();
+					Article.set({text: text});
+					checkLocation(text, Article);
 
 					var av = new Overview();
 					av.render();
 					Article.bind('change', av.render, av);
 					Authors.bind('update', av.render, av);
 					av.fetch();
+
+					var lv = new LocationView();
+					lv.render();
 
 					var mv = new MapView();
 					Locations.bind('update', mv.render, mv);
