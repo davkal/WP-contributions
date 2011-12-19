@@ -27,16 +27,43 @@ define(["jquery",
 		}
 
 		function checkLocation(text, model) {
-			var p = /latd=(\d+) ?\|latm=(\d+) ?\|lats=(\d+) ?\|longd=(\d+) ?\|longm=(\d+) ?\|longs=(\d+)/;
-			var match = text.match(p);
-			console.log(match);
-			if(match && match.length == 7) {
-				var loc = {
-					latitude: parseInt(match[1]) + (parseInt(match[2]) * 60 + parseInt(match[3])) / 3600,
-					longitude: parseInt(match[4]) + (parseInt(match[5]) * 60 + parseInt(match[6])) / 3600
-				};
-				model.set({location: loc});
-			} else {
+			var m = text.match(/latd=(\d+) ?\|latm=(\d+) ?\|latNS=([NS]) ?\|longd=(\d+) ?\|longm=(\d+) ?\|longEW=([EW])/);
+					c(m);
+			var patterns = {
+				"{{coord\\|(\\d+)\\|(\\d+)\\|(\\d+)\\|([NS])\\|(\\d+)\\|(\\d+)\\|(\\d+)\\|([EW])\\|": function(match) {
+					var ns = match[4] == 'S' ? -1 : 1;
+					var ew = match[8] == 'W' ? -1 : 1;
+					return [ns * (parseInt(match[1]) + (parseInt(match[2]) * 60 + parseInt(match[3])) / 3600),
+							ew * (parseInt(match[5]) + (parseInt(match[6]) * 60 + parseInt(match[7])) / 3600) ]
+				},
+				"{{coord\\|(\\d+)\\|(\\d+)\\|([NS])\\|(\\d+)\\|(\\d+)\\|([EW])\\|": function(match) {
+					var ns = match[3] == 'S' ? -1 : 1;
+					var ew = match[6] == 'W' ? -1 : 1;
+					return [(parseInt(match[1]) + parseInt(match[2]) / 60) * ns,
+							(parseInt(match[4]) + parseInt(match[5]) / 60) * ew ]
+				},
+				"latd=(\\d+) ?\\|latm=(\\d+) ?\\|lats=(\\d+) ?\\|longd=(\\d+) ?\\|longm=(\\d+) ?\\|longs=(\\d+)": function(match) {
+					return [parseInt(match[1]) + (parseInt(match[2]) * 60 + parseInt(match[3])) / 3600,
+							parseInt(match[4]) + (parseInt(match[5]) * 60 + parseInt(match[6])) / 3600]
+				},
+				"latd=(\\d+) ?\\|latm=(\\d+) ?\\|latNS=([NS]) ?\\|longd=(\\d+) ?\\|longm=(\\d+) ?\\|longEW=([EW])": function(match) {
+					var ns = match[3] == 'S' ? -1 : 1;
+					var ew = match[6] == 'W' ? -1 : 1;
+					return [ (parseInt(match[1]) + parseInt(match[2]) / 60) * ns,
+							(parseInt(match[4]) + parseInt(match[5]) / 60) * ew ]
+				}
+			};
+			_.each(patterns, function(parser, pattern) {
+				var match = text.match(new RegExp(pattern, "i"));
+				if(match && match.length > 1) {
+					var loc = parser(match);
+					if(loc) {
+						model.set({location: {latitude: loc[0], longitude: loc[1]}});
+						return false;
+					}
+				}
+			});
+			if(!model.get('location')) {
 				console.log("No match for geotag.");
 			}
 		}
