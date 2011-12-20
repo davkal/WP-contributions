@@ -27,34 +27,42 @@ define(["jquery",
 		}
 
 		function checkLocation(text, model) {
-			var m = text.match(/latd=(\d+) ?\|latm=(\d+) ?\|latNS=([NS]) ?\|longd=(\d+) ?\|longm=(\d+) ?\|longEW=([EW])/);
-					c(m);
 			var patterns = {
-				"{{coord\\|(\\d+)\\|(\\d+)\\|(\\d+)\\|([NS])\\|(\\d+)\\|(\\d+)\\|(\\d+)\\|([EW])\\|": function(match) {
+				"{{coord\\|(\\d+)\\|(\\d+)\\|([\\d\\.]+)\\|([NS])\\|(\\d+)\\|(\\d+)\\|([\\d\\.]+)\\|([EW])\\|": function(match) {
 					var ns = match[4] == 'S' ? -1 : 1;
 					var ew = match[8] == 'W' ? -1 : 1;
-					return [ns * (parseInt(match[1]) + (parseInt(match[2]) * 60 + parseInt(match[3])) / 3600),
-							ew * (parseInt(match[5]) + (parseInt(match[6]) * 60 + parseInt(match[7])) / 3600) ]
+					return [ns * (parseFloat(match[1]) + (parseFloat(match[2]) * 60 + parseFloat(match[3])) / 3600),
+							ew * (parseFloat(match[5]) + (parseFloat(match[6]) * 60 + parseFloat(match[7])) / 3600) ]
 				},
-				"{{coord\\|(\\d+)\\|(\\d+)\\|([NS])\\|(\\d+)\\|(\\d+)\\|([EW])\\|": function(match) {
+				"{{coord\\|(\\d+)\\|([\\d\\.]+)\\|([NS])\\|(\\d+)\\|([\\d\\.]+)\\|([EW])\\|": function(match) {
 					var ns = match[3] == 'S' ? -1 : 1;
 					var ew = match[6] == 'W' ? -1 : 1;
-					return [(parseInt(match[1]) + parseInt(match[2]) / 60) * ns,
-							(parseInt(match[4]) + parseInt(match[5]) / 60) * ew ]
+					return [(parseFloat(match[1]) + parseFloat(match[2]) / 60) * ns,
+							(parseFloat(match[4]) + parseFloat(match[5]) / 60) * ew ]
 				},
-				"latd=(\\d+) ?\\|latm=(\\d+) ?\\|lats=(\\d+) ?\\|longd=(\\d+) ?\\|longm=(\\d+) ?\\|longs=(\\d+)": function(match) {
-					return [parseInt(match[1]) + (parseInt(match[2]) * 60 + parseInt(match[3])) / 3600,
-							parseInt(match[4]) + (parseInt(match[5]) * 60 + parseInt(match[6])) / 3600]
+				"{{coord\\|([\\d\\.]+)\\|([NS])\\|([\\d\\.]+)\\|([EW])\\|": function(match) {
+					var ns = match[2] == 'S' ? -1 : 1;
+					var ew = match[4] == 'W' ? -1 : 1;
+					return [parseFloat(match[1]) * ns,
+							parseFloat(match[3]) * ew ]
 				},
-				"latd=(\\d+) ?\\|latm=(\\d+) ?\\|latNS=([NS]) ?\\|longd=(\\d+) ?\\|longm=(\\d+) ?\\|longEW=([EW])": function(match) {
+				"{{coord\\|(-?[\\d\\.]+)\\|(-?[\\d\\.]+)\\|display": function(match) {
+					return [parseFloat(match[1]),
+							parseFloat(match[2])]
+				},
+				"latd=(-?\\d+)\\s*\\|latm=(\\d+)\\s*\\|lats=([\\d\\.]+)\\s*\\|longd=(-?\\d+)\\s*\\|longm=(\\d+)\\s*\\|longs=([\\d\\.]+)": function(match) {
+					return [parseFloat(match[1]) + (parseFloat(match[2]) * 60 + parseFloat(match[3])) / 3600,
+							parseFloat(match[4]) + (parseFloat(match[5]) * 60 + parseFloat(match[6])) / 3600]
+				},
+				"latd=(\\d+)\\s*\\|latm=([\\d\\.]+)\\s*\\|latNS=([NS])\\s*\\|longd=(\\d+)\\s*\\|longm=([\\d\\.]+)\\s*\\|longEW=([EW])": function(match) {
 					var ns = match[3] == 'S' ? -1 : 1;
 					var ew = match[6] == 'W' ? -1 : 1;
-					return [ (parseInt(match[1]) + parseInt(match[2]) / 60) * ns,
-							(parseInt(match[4]) + parseInt(match[5]) / 60) * ew ]
+					return [ (parseFloat(match[1]) + parseFloat(match[2]) / 60) * ns,
+							(parseFloat(match[4]) + parseFloat(match[5]) / 60) * ew ]
 				}
 			};
 			_.each(patterns, function(parser, pattern) {
-				var match = text.match(new RegExp(pattern, "i"));
+				var match = text.match(new RegExp(pattern, "im"));
 				if(match && match.length > 1) {
 					var loc = parser(match);
 					if(loc) {
@@ -217,7 +225,7 @@ define(["jquery",
 			renderMap: function(loc) {
 				var myLatlng = new google.maps.LatLng(loc.latitude, loc.longitude);
 				var myOptions = {
-					zoom: 1,
+					zoom: 2,
 					disableDefaultUI: true,
 					mapTypeId: google.maps.MapTypeId.ROADMAP,
 					center: myLatlng
