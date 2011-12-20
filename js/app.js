@@ -89,6 +89,20 @@ define(["jquery",
 			return rad * 6372.8;
 		}
 
+		function signatureDistance(filter) {
+			var sd = 0, loc, dist, count;
+			var allCount = Article.get('anon_count');
+			Authors.each(function(author) {
+				loc = author.get('location');
+				// if "filter" is set, it must be an author property
+				if(loc && (!filter || author.get(filter))) {
+					dist = loc.get('distance');
+					count = author.get('count');
+					sd += dist * count / allCount;
+				}
+			});
+			return sd;
+		}
 
 		window.Article = new Backbone.Model;
 		window.Authors = new Backbone.Collection;
@@ -199,16 +213,7 @@ define(["jquery",
 					});
 
 					if(articleLoc) {
-						var sd = 0, count;
-						var allCount = Article.get('anon_count');
-						Authors.each(function(author) {
-							loc = author.get('location');
-							if(loc) {
-								dist = loc.get('distance');
-								count = author.get('count');
-								sd += dist * count / allCount;
-							}
-						});
+						var sd = signatureDistance();
 						Article.set({sig_dist: sd});
 					}
 
@@ -276,8 +281,8 @@ define(["jquery",
 					this.row(['span-two-thirds', 'span-one-third']);
 					this.renderMap(loc);
 					this.column(2);
-					this.display('Latitude', loc.get('latitude'));
-					this.display('Longitude', loc.get('longitude'));
+					this.display('Latitude', loc.get('latitude').toFixed(3));
+					this.display('Longitude', loc.get('longitude').toFixed(3));
 				}
 				return this;
 			}
@@ -307,7 +312,7 @@ define(["jquery",
 					this.column(2);
 					this.textarea('Countries ({0})'.format(_.size(geoCount)), geoCount.join('\n'));
 					if(Article.has('sig_dist')) {
-						this.display("Signature distance", "{0} km".format(Article.get('sig_dist')));
+						this.display("Signature distance", "{0} km".format(Article.get('sig_dist').toFixed(3)));
 					}
 				}
 				return this;
@@ -332,6 +337,11 @@ define(["jquery",
 						var author = Authors.get(editor);
 						author && author.set({survived: true});
 					});
+					if(Article.has('location')) {
+						var sd = signatureDistance('survived');
+						Article.set({sig_dist_survivors: sd});
+					}
+
 					me.loaded = true;
 					me.render();
 				});
@@ -352,6 +362,9 @@ define(["jquery",
 					this.renderMap(geoCount);
 					this.column(2);
 					this.textarea('Countries ({0})'.format(_.size(geoCount)), geoCount.join('\n'));
+					if(Article.has('sig_dist_survivors')) {
+						this.display("Signature distance", "{0} km".format(Article.get('sig_dist_survivors').toFixed(3)));
+					}
 				}
 				return this;
 			}
