@@ -66,7 +66,7 @@ define(["jquery",
 				if(match && match.length > 1) {
 					var loc = parser(match);
 					if(loc) {
-						model.set({location: {latitude: loc[0], longitude: loc[1]}});
+						model.set({location: new Backbone.Model({latitude: loc[0], longitude: loc[1]})});
 						return false;
 					}
 				}
@@ -75,6 +75,20 @@ define(["jquery",
 				console.log("No match for geotag.");
 			}
 		}
+
+		function deg2rad(deg) {
+			return parseFloat(deg) / 180 * Math.PI;
+		}
+
+		function geodesicDistance(loc1, loc2) {
+			var lat1 = deg2rad(loc1.get('latitude'));
+			var long1 = deg2rad(loc1.get('longitude'));
+			var lat2 = deg2rad(loc2.get('latitude'));
+			var long2 = deg2rad(loc2.get('longitude'));
+			var rad = Math.acos(Math.sin(lat1) * Math.sin(lat2) + Math.cos(lat1) * Math.cos(lat2) * Math.cos(long1 - long2));
+			return rad * 6372.8;
+		}
+
 
 		window.Article = new Backbone.Model;
 		window.Authors = new Backbone.Collection;
@@ -155,7 +169,8 @@ define(["jquery",
 					});
 
 					// adding anons
-					var user, loc;
+					var user, loc, dist;
+					var articleLoc = Article.get('location');
 					_.each(data.anons, function(arr, ts) {
 						if(arr && arr.length == 4) {
 							user = arr[0];
@@ -168,6 +183,10 @@ define(["jquery",
 								});
 							}
 							loc = Locations.get(user);
+							if(articleLoc && !loc.has('distance')) {
+								dist = geodesicDistance(articleLoc, loc);
+								loc.set({distance: dist});
+							}
 							Revisions.add({
 								id: ts,
 								user: user,
@@ -178,6 +197,21 @@ define(["jquery",
 							console.log("Unknown location", arr);
 						}
 					});
+
+					if(articleLoc) {
+						var sd = 0, count;
+						var allCount = Article.get('anon_count');
+						Authors.each(function(author) {
+							loc = author.get('location');
+							if(loc) {
+								dist = loc.get('distance');
+								count = author.get('count');
+								sd += dist * count / allCount;
+							}
+						});
+						Article.set({sig_dist: sd});
+					}
+
 					Authors.trigger('update');
 					Locations.trigger('update');
 				});
@@ -223,7 +257,7 @@ define(["jquery",
 			title: "Article Location",
 			id: "location",
 			renderMap: function(loc) {
-				var myLatlng = new google.maps.LatLng(loc.latitude, loc.longitude);
+				var myLatlng = new google.maps.LatLng(loc.get('latitude'), loc.get('longitude'));
 				var myOptions = {
 					zoom: 2,
 					disableDefaultUI: true,
@@ -242,8 +276,8 @@ define(["jquery",
 					this.row(['span-two-thirds', 'span-one-third']);
 					this.renderMap(loc);
 					this.column(2);
-					this.display('Latitude', loc.latitude);
-					this.display('Longitude', loc.longitude);
+					this.display('Latitude', loc.get('latitude'));
+					this.display('Longitude', loc.get('longitude'));
 				}
 				return this;
 			}
@@ -272,6 +306,9 @@ define(["jquery",
 					this.renderMap(geoCount);
 					this.column(2);
 					this.textarea('Countries ({0})'.format(_.size(geoCount)), geoCount.join('\n'));
+					if(Article.has('sig_dist')) {
+						this.display("Signature distance", "{0} km".format(Article.get('sig_dist')));
+					}
 				}
 				return this;
 			}
