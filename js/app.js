@@ -86,22 +86,23 @@ define(["jquery",
 			var lat2 = deg2rad(loc2.get('latitude'));
 			var long2 = deg2rad(loc2.get('longitude'));
 			var rad = Math.acos(Math.sin(lat1) * Math.sin(lat2) + Math.cos(lat1) * Math.cos(lat2) * Math.cos(long1 - long2));
-			return rad * 6372.8;
+			return Math.abs(rad) * 6372.8;
 		}
 
 		function signatureDistance(filter) {
 			var sd = 0, loc, dist, count;
-			var allCount = Article.get('anon_count');
+			var allCount = 0;
 			Authors.each(function(author) {
 				loc = author.get('location');
 				// if "filter" is set, it must be an author property
 				if(loc && (!filter || author.get(filter))) {
 					dist = loc.get('distance');
 					count = author.get('count');
-					sd += dist * count / allCount;
+					allCount += count;
+					sd += dist * count;
 				}
 			});
-			return sd;
+			return sd / allCount;
 		}
 
 		window.Article = new Backbone.Model;
