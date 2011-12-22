@@ -26,8 +26,54 @@ define(["jquery",
 			return country;
 		}
 
-		function checkLocation(text, model) {
-			var patterns = {
+		function signatureDistance(filter) {
+			var sd = 0, loc, dist, count;
+			var allCount = 0;
+			Authors.each(function(author) {
+				loc = author.get('location');
+				// if "filter" is set, it must be an author property
+				if(loc && (!filter || author.get(filter))) {
+					dist = loc.get('distance');
+					count = author.get('count');
+					allCount += count;
+					sd += dist * count;
+				}
+			});
+			return sd / allCount;
+		}
+
+		window.Model = Backbone.Model.extend({
+			retrieve: function() {
+				var me = this;
+				me.fetch({
+					success: function(res) {
+						me.trigger(me.loaded || 'loaded');
+					}
+				});
+			}
+		});
+
+		window.Collection = Backbone.Collection.extend({
+			continue: false,
+			retrieve: function() {
+				var me = this;
+				me.fetch({
+					add: !!me.append,
+					success: function(res) {
+						if(!me.continue) {
+							me.trigger(me.loaded || 'loaded');
+						}
+					}
+				});
+			}
+		});
+
+		window.Location = Model.extend({
+			calcDistance: function(loc) {
+				this.set({distance: Location.geodesicDistance(this, loc)});
+			}
+		}, {
+			patterns: {
 				"{{coord\\|(\\d+)\\|(\\d+)\\|([\\d\\.]+)\\|([NS])\\|(\\d+)\\|(\\d+)\\|([\\d\\.]+)\\|([EW])\\|": function(match) {
 					var ns = match[4] == 'S' ? -1 : 1;
 					var ew = match[8] == 'W' ? -1 : 1;
@@ -60,56 +106,220 @@ define(["jquery",
 					return [ (parseFloat(match[1]) + parseFloat(match[2]) / 60) * ns,
 							(parseFloat(match[4]) + parseFloat(match[5]) / 60) * ew ]
 				}
-			};
-			_.each(patterns, function(parser, pattern) {
-				var match = text.match(new RegExp(pattern, "im"));
-				if(match && match.length > 1) {
-					var loc = parser(match);
-					if(loc) {
-						model.set({location: new Backbone.Model({latitude: loc[0], longitude: loc[1]})});
-						return false;
+			},
+			parseText: function(text) {
+				var match, loc;
+				_.any(Location.patterns, function(parser, pattern) {
+					match = text.match(new RegExp(pattern, "im"));
+					if(match && match.length > 1) {
+						loc = parser(match);
 					}
+					return match;
+				});
+				if(loc) {
+					return new Location({
+						latitude: loc[0],
+						longitude: loc[1]
+					});
+				} else {
+					App.status("No match for geotag.");
 				}
-			});
-			if(!model.get('location')) {
-				console.log("No match for geotag.");
+			},
+			deg2rad: function(deg) {
+				return parseFloat(deg) / 180 * Math.PI;
+			},
+			geodesicDistance: function(loc1, loc2) {
+				var lat1 = Location.deg2rad(loc1.get('latitude'));
+				var long1 = Location.deg2rad(loc1.get('longitude'));
+				var lat2 = Location.deg2rad(loc2.get('latitude'));
+				var long2 = Location.deg2rad(loc2.get('longitude'));
+				var rad = Math.acos(Math.sin(lat1) * Math.sin(lat2) + Math.cos(lat1) * Math.cos(lat2) * Math.cos(long1 - long2));
+				return Math.abs(rad) * 6372.8;
 			}
-		}
+		});
 
-		function deg2rad(deg) {
-			return parseFloat(deg) / 180 * Math.PI;
-		}
-
-		function geodesicDistance(loc1, loc2) {
-			var lat1 = deg2rad(loc1.get('latitude'));
-			var long1 = deg2rad(loc1.get('longitude'));
-			var lat2 = deg2rad(loc2.get('latitude'));
-			var long2 = deg2rad(loc2.get('longitude'));
-			var rad = Math.acos(Math.sin(lat1) * Math.sin(lat2) + Math.cos(lat1) * Math.cos(lat2) * Math.cos(long1 - long2));
-			return Math.abs(rad) * 6372.8;
-		}
-
-		function signatureDistance(filter) {
-			var sd = 0, loc, dist, count;
-			var allCount = 0;
-			Authors.each(function(author) {
-				loc = author.get('location');
-				// if "filter" is set, it must be an author property
-				if(loc && (!filter || author.get(filter))) {
-					dist = loc.get('distance');
-					count = author.get('count');
-					allCount += count;
-					sd += dist * count;
+		window.Page = Model.extend({
+			loaded: 'found',
+			url: function() {
+				App.status("Querying en.wikipedia.org...");
+				return "http://en.wikipedia.org/w/api.php?action=query&prop=info&format=json&redirects&callback=?&export&titles=" + encodeURI(this.get('input'));
+			},
+			calcSignatureDistanceSurvivors: function() {
+				if(this.has('location')) {
+					this.set({sig_dist_survivors: signatureDistance('survived')});
 				}
-			});
-			return sd / allCount;
-		}
+			},
+			calcSignatureDistance: function() {
+				if(this.has('location')) {
+					this.set({sig_dist: signatureDistance()});
+				}
+			},
+			parse: function(res) {
+				var pages = res.query.pages;
+				if(pages["-1"]) {
+					App.error("Invalid article.");
+					return;
+				}
+				App.status("Loaded article info.");
+				var page = _.first(_.values(pages));
+				var xml = $.parseXML(res.query.export['*']);
+				var text = $(xml).find('text').text();
+				page['text'] = text;
+				var loc;
+				if(loc = Location.parseText(text)) {
+					page['location'] = loc;
+				}
+				return page;
+			}
+		});
 
-		window.Article = new Backbone.Model;
-		window.Authors = new Backbone.Collection;
-		window.Bots = new Backbone.Collection;
-		window.Locations = new Backbone.Collection;
-		window.Revisions = new Backbone.Collection;
+		window.Author = Model.extend({});
+
+		window.Authorship = Collection.extend({
+			model: Author,
+			updateLocations: function() {
+				if(_.size(Locations)) {
+					var loc;
+					this.each(function(author) {
+						if(loc = Locations.get(author.id)) {
+							author.set({location: loc});
+						}
+					});
+					this.trigger('location');
+				}
+			},
+			url: function() {
+				if(Article.has('title')) {
+					App.status("Querying toolserver...");
+					return "http://toolserver.org/~sonet/api.php?lang=en&editors&anons&callback=?&article="
+						+ encodeURI(Article.get('title'));
+				}
+			},
+			parse: function(res) {
+				if(res.error) {
+					App.error("Invalid article.");
+					return;
+				} else {
+					App.status("Parsing contributors...");
+				}
+				var info = _.extract(res, ["first_edit", "count", "editor_count", "anon_count", "last_edit", "minor_count"]);
+				Article.set(info);
+
+				// parsing locations
+				var user, loc, dist;
+				var articleLoc = Article.get('location');
+				_.each(res.anons, function(arr, ts) {
+					if(arr && arr.length == 4) {
+						user = arr[0];
+						if(!Locations.get(user)) {
+							Locations.add({
+								id: user,
+								region: countrify(arr[1]),
+								latitude: arr[2],
+								longitude: arr[3]
+							});
+						}
+						loc = Locations.get(user);
+						if(articleLoc && !loc.has('distance')) {
+							loc.calcDistance(articleLoc);
+						}
+					} else {
+						console.log("Unknown location", arr);
+					}
+				});
+
+				// adding all editors
+				var editors = [], author;
+				_.each(res.editors, function(obj, name) {
+					if(name.toLowerCase().endsWith('bot')) {
+						Bots.add({
+							id: name
+						});
+					}
+					author = new Author({
+						id: name,
+						count: obj.all,
+						minor: obj.minor
+					});
+					if(loc = Locations.get(name)) {
+						author.set({location: loc});
+					}
+					Revisions.updateAuthor(author);
+					editors.push(author)
+				});
+
+				App.status();
+				return editors;
+			}
+		});
+
+		window.Bots = new Collection;
+		window.LocationCollection = Collection.extend({
+			model: Location
+		});
+		window.RevisionCollection = Collection.extend({
+			append: true,
+			continue: false,
+			url: function() {
+				App.status("Getting revisions from en.wikipedia.org...");
+				var offset = this.continue ? "&rvstart=" + this.continue : "";
+				return "http://en.wikipedia.org/w/api.php?action=query&prop=revisions&format=json&redirects&callback=?&rvlimit=500&pageids=" + Article.get('pageid') + offset;
+			},
+			parse: function(res) {
+				var pages = res.query.pages;
+				if(pages["-1"]) {
+					App.error("Invalid article.");
+					return;
+				}
+				App.status("Parsing revisions...");
+				var page = _.first(_.values(pages));
+				_.each(page.revisions, function(rev) {
+					rev.id = rev.revid;
+				});
+				App.status();
+				if(page.revisions.length == 500) {
+					var last = page.revisions.pop();
+					this.continue = last.timestamp;
+					this.retrieve();
+				} else {
+					this.continue = false;
+				}
+				return page.revisions;
+			},
+			updateAuthor: function(author) {
+				this.each(function(rev) {
+					if(rev.get('user') == author.id) {
+						rev.set({author: author});
+					}
+				});
+			},
+			updateLocation: function(ts, user, loc) {
+				var rev = this.find(function(r) {
+					return r.get('user') == user && r.get('timestamp') == ts;
+				});
+				if(rev) {
+					rev.set({location: loc});
+				} else {
+					c("Could not update location for user " + user);
+				}
+			},
+			merge: function() {
+				var id = Article.get("lastrevid");
+				var ts = Article.get("touched");
+				var last = this.find(function(rev) {
+					return rev.get("ts") == ts;
+				});
+				if(!last) {
+					this.add({
+						id: id
+					});
+					last = this.get(id);
+				} else {
+					last.set({ts: ts});
+				}
+				return
+			}
+		});
 
 		window.SectionView = Backbone.View.extend({
 			initialize: function() {
@@ -154,74 +364,6 @@ define(["jquery",
 
 		window.Overview = SectionView.extend({
 			title: "Overview",
-			fetch: function() {
-				var me = this;
-				var url = "http://toolserver.org/~sonet/api.php?lang=en&editors&anons&callback=?&article="
-					+ encodeURI(Article.get("title"));
-				App.status("Querying toolserver...");
-				$.getJSON(url, function(data){
-					if(data.error) {
-						me.trigger('error', "Invalid article.");
-						return;
-					} else {
-						App.status();
-					}
-					var info = _.extract(data, ["first_edit", "count", "editor_count", "anon_count", "last_edit", "minor_count"]);
-					Article.set(info);
-
-					// adding all editors
-					_.each(data.editors, function(obj, name) {
-						if(name.toLowerCase().endsWith('bot')) {
-							Bots.add({
-								id: name
-							});
-						}
-						Authors.add({
-							id: name,
-							count: obj.all,
-							minor: obj.minor
-						});
-					});
-
-					// adding anons
-					var user, loc, dist;
-					var articleLoc = Article.get('location');
-					_.each(data.anons, function(arr, ts) {
-						if(arr && arr.length == 4) {
-							user = arr[0];
-							if(!Locations.get(user)) {
-								Locations.add({
-									id: user,
-									region: countrify(arr[1]),
-									latitude: arr[2],
-									longitude: arr[3]
-								});
-							}
-							loc = Locations.get(user);
-							if(articleLoc && !loc.has('distance')) {
-								dist = geodesicDistance(articleLoc, loc);
-								loc.set({distance: dist});
-							}
-							Revisions.add({
-								id: ts,
-								user: user,
-								location: loc
-							});
-							Authors.get(user).set({location: loc});
-						} else {
-							console.log("Unknown location", arr);
-						}
-					});
-
-					if(articleLoc) {
-						var sd = signatureDistance();
-						Article.set({sig_dist: sd});
-					}
-
-					Authors.trigger('update');
-					Locations.trigger('update');
-				});
-			},
 			render: function() {
 				this.row(['span-one-third', 'span-one-third', 'span-one-third']);
 				var m = Article;
@@ -302,8 +444,11 @@ define(["jquery",
 			render: function() {
 				if(_.size(Locations) && _.size(Revisions)) {
 					this.row(['span-two-thirds', 'span-one-third']);
-					var geoData = Revisions.groupBy(function(rev) {
-						return rev.get('location').get('region');
+					var located = Revisions.filter(function(rev) {
+						return rev.has('author') && rev.get('author').has('location');
+					});
+					var geoData = _.groupBy(located, function(rev) {
+						return rev.get('author').get('location').get('region');
 					});
 					var geoCount = _.sortBy(_.map(geoData, function(num, key) { 
 						return [key, _.size(num)] 
@@ -338,10 +483,7 @@ define(["jquery",
 						var author = Authors.get(editor);
 						author && author.set({survived: true});
 					});
-					if(Article.has('location')) {
-						var sd = signatureDistance('survived');
-						Article.set({sig_dist_survivors: sd});
-					}
+					Article.calcSignatureDistanceSurvivors();
 
 					me.loaded = true;
 					me.render();
@@ -382,6 +524,30 @@ define(["jquery",
 				this.statusEl = $('#status');
 				this.container = $('#content .container');
 				this.nav = $('.topbar ul.nav');
+
+				window.Article = new Page();
+				window.Authors = new Authorship();
+				window.Revisions = new RevisionCollection();
+				window.Locations = new LocationCollection;
+
+				var av = new Overview();
+				var lv = new LocationView();
+				var mv = new MapView();
+				var sv = new SurvivorView();
+
+				Article.bind('change:input', Article.retrieve, Article);
+				Article.bind('change:pageid', av.render, av);
+				Article.bind('change:location', lv.render, lv);
+				Article.bind('change:sig_dist', mv.render, mv);
+				Article.bind('found', av.render, av);
+				Article.bind('found', Revisions.retrieve, Revisions);
+
+				Revisions.bind('loaded', Authors.retrieve, Authors);
+
+				Authors.bind('loaded', av.render, av);
+				Authors.bind('loaded', Article.calcSignatureDistance, Article);
+				Authors.bind('loaded', mv.render, mv);
+				Authors.bind('loaded', sv.fetch, sv);
 			},
 			status: function(msg) {
 				this.statusEl.text(msg || "Ready.");
@@ -395,10 +561,10 @@ define(["jquery",
 				$('a[href!="#"]', this.nav).remove();
 
 				Article.clear({silent: true});
-				Authors.reset();
-				Bots.reset();
-				Revisions.reset();
-				Locations.reset();
+				Authors.reset(null, {silent: true});
+				Bots.reset(null, {silent: true});
+				Revisions.reset(null, {silent: true});
+				Locations.reset(null, {silent: true});
 			},
 			link: function(sec) {
 				if(!$('a[href="#{0}"]'.format(sec.id), this.nav).length) {
@@ -414,40 +580,7 @@ define(["jquery",
 			}, 
 			analyze: function(input) {
 				this.clear();
-				var me = this;
-				var url = "http://en.wikipedia.org/w/api.php?action=query&prop=info&format=json&redirects&callback=?&export&titles="
-					+ encodeURI(input);
-				App.status("Querying en.wikipedia.org...");
-				$.getJSON(url, function(data){
-					var pages = data.query.pages;
-					if(pages["-1"]) {
-						me.error("Invalid article.");
-						return;
-					}
-					App.status("Loaded article info.");
-
-					var page = _.first(_.values(pages));
-					Article.set(page);
-					var xml = $.parseXML(data.query.export['*']);
-					var text = $(xml).find('text').text();
-					Article.set({text: text});
-					checkLocation(text, Article);
-
-					var av = new Overview();
-					av.render();
-					Article.bind('change', av.render, av);
-					Authors.bind('update', av.render, av);
-					av.fetch();
-
-					var lv = new LocationView();
-					lv.render();
-
-					var mv = new MapView();
-					Locations.bind('update', mv.render, mv);
-
-					var sv = new SurvivorView();
-					Locations.bind('update', sv.fetch, sv);
-				});
+				Article.set({input: input});
 			},
 			analyzeOnClick: function(e) {
 				var text = this.input.val();
@@ -463,6 +596,9 @@ define(["jquery",
 				return false;
 			}
 		});
+
+//		var b = new Barticle({title: 'Egypt'});
+//		b.bind('change', c);
 
 	return {
 		init: function() {
