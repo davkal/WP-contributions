@@ -26,22 +26,6 @@ define(["jquery",
 			return country;
 		}
 
-		function signatureDistance(filter) {
-			var sd = 0, loc, dist, count;
-			var allCount = 0;
-			Authors.each(function(author) {
-				loc = author.get('location');
-				// if "filter" is set, it must be an author property
-				if(loc && (!filter || author.get(filter))) {
-					dist = loc.get('distance');
-					count = author.get('count');
-					allCount += count;
-					sd += dist * count;
-				}
-			});
-			return sd / allCount;
-		}
-
 		window.Model = Backbone.Model.extend({
 			retrieve: function() {
 				var me = this;
@@ -55,6 +39,12 @@ define(["jquery",
 
 		window.Collection = Backbone.Collection.extend({
 			continue: false,
+			limit: 500,
+			page: 1,
+			status: function(total) {
+				var pages = Math.ceil(total/(this.limit-1));
+				return "{0}/{1}".format(this.page, pages);
+			},
 			retrieve: function() {
 				var me = this;
 				me.fetch({
@@ -144,14 +134,9 @@ define(["jquery",
 				App.status("Querying en.wikipedia.org...");
 				return "http://en.wikipedia.org/w/api.php?action=query&prop=info&format=json&redirects&callback=?&export&titles=" + encodeURI(this.get('input'));
 			},
-			calcSignatureDistanceSurvivors: function() {
-				if(this.has('location')) {
-					this.set({sig_dist_survivors: signatureDistance('survived')});
-				}
-			},
 			calcSignatureDistance: function() {
 				if(this.has('location')) {
-					this.set({sig_dist: signatureDistance()});
+					this.set({sig_dist: Authors.signatureDistance()});
 				}
 			},
 			parse: function(res) {
@@ -173,20 +158,45 @@ define(["jquery",
 			}
 		});
 
+		window.Revision = Model.extend({
+			fetchAuthors: function() {
+				var me = this;
+				var url = "http://en.collaborativetrust.com/WikiTrust/RemoteAPI?method=wikimarkup&pageid={0}&revid={1}".format(Article.get('pageid'), this.id);
+				App.status("Authors for text in revision {0}...".format(this.id));
+				$.get(url, function(res){
+					App.status();
+					var pattern = /{{#t:[^{}]*}}/gm;
+					var tokens = res.responseText.match(pattern);
+					var editors = _.uniq(_.map(tokens, function(token) {
+						return token.replace("{{", "").replace("}}", "").split(",")[2];
+					}));
+					var sd;
+				   	if(sd = Authors.signatureDistance(editors)) {
+						me.set({sig_dist: sd});
+					}
+					me.set({authors: editors});
+				});
+			}
+		});
+
 		window.Author = Model.extend({});
 
 		window.Authorship = Collection.extend({
 			model: Author,
-			updateLocations: function() {
-				if(_.size(Locations)) {
-					var loc;
-					this.each(function(author) {
-						if(loc = Locations.get(author.id)) {
-							author.set({location: loc});
-						}
-					});
-					this.trigger('location');
-				}
+			signatureDistance: function(authors) {
+				var sd = 0, loc, dist, count;
+				var allCount = 0;
+				this.each(function(author) {
+					loc = author.get('location');
+					// if "filter" is set, it must be an author property
+					if(loc && (!authors|| _.include(authors, author.id))) {
+						dist = loc.get('distance');
+						count = author.get('count');
+						allCount += count;
+						sd += dist * count;
+					}
+				});
+				return sd / allCount;
 			},
 			url: function() {
 				if(Article.has('title')) {
@@ -244,7 +254,6 @@ define(["jquery",
 					if(loc = Locations.get(name)) {
 						author.set({location: loc});
 					}
-					Revisions.updateAuthor(author);
 					editors.push(author)
 				});
 
@@ -258,10 +267,12 @@ define(["jquery",
 			model: Location
 		});
 		window.RevisionCollection = Collection.extend({
+			model: Revision,
 			append: true,
 			continue: false,
 			url: function() {
-				App.status("Getting revisions from en.wikipedia.org...");
+				var total = Article.get('count');
+				App.status("Getting revisions {0}...".format(this.status(total)));
 				var offset = this.continue ? "&rvstart=" + this.continue : "";
 				return "http://en.wikipedia.org/w/api.php?action=query&prop=revisions&format=json&redirects&callback=?&rvlimit=500&pageids=" + Article.get('pageid') + offset;
 			},
@@ -272,14 +283,19 @@ define(["jquery",
 					return;
 				}
 				App.status("Parsing revisions...");
+				var loc;
 				var page = _.first(_.values(pages));
 				_.each(page.revisions, function(rev) {
 					rev.id = rev.revid;
+					if(loc = Locations.get(rev.username)) {
+						rev.location = loc;
+					}
 				});
 				App.status();
 				if(page.revisions.length == 500) {
 					var last = page.revisions.pop();
 					this.continue = last.timestamp;
+					this.page++;
 					this.retrieve();
 				} else {
 					this.continue = false;
@@ -303,21 +319,10 @@ define(["jquery",
 					c("Could not update location for user " + user);
 				}
 			},
-			merge: function() {
-				var id = Article.get("lastrevid");
-				var ts = Article.get("touched");
-				var last = this.find(function(rev) {
-					return rev.get("ts") == ts;
-				});
-				if(!last) {
-					this.add({
-						id: id
-					});
-					last = this.get(id);
-				} else {
-					last.set({ts: ts});
-				}
-				return
+			current: function() {
+				var rev = this.get(Article.get("lastrevid"));
+				CurrentRevision.set(rev.toJSON());
+				return CurrentRevision;
 			}
 		});
 
@@ -408,6 +413,9 @@ define(["jquery",
 				var myLatlng = new google.maps.LatLng(loc.get('latitude'), loc.get('longitude'));
 				var myOptions = {
 					zoom: 2,
+					zoomControl: false,
+					scrollwheel: false,
+					draggable: false,
 					disableDefaultUI: true,
 					mapTypeId: google.maps.MapTypeId.ROADMAP,
 					center: myLatlng
@@ -442,16 +450,16 @@ define(["jquery",
 				geoChart.draw(table);
 			},
 			render: function() {
-				if(_.size(Locations) && _.size(Revisions)) {
+				if(_.size(Locations) && _.size(Authors)) {
 					this.row(['span-two-thirds', 'span-one-third']);
-					var located = Revisions.filter(function(rev) {
-						return rev.has('author') && rev.get('author').has('location');
+					var located = Authors.filter(function(author) {
+						return author.has('location');
 					});
-					var geoData = _.groupBy(located, function(rev) {
-						return rev.get('author').get('location').get('region');
+					var geoData = _.groupBy(located, function(author) {
+						return author.get('location').get('region');
 					});
-					var geoCount = _.sortBy(_.map(geoData, function(num, key) { 
-						return [key, _.size(num)] 
+					var geoCount = _.sortBy(_.map(geoData, function(authors, region) { 
+						return [region, _.reduce(authors, function(memo, author) { return memo + author.get('count');}, 0)] 
 					}), function(num){return num[1]});
 					geoCount.reverse();
 					this.renderMap(geoCount);
@@ -467,33 +475,12 @@ define(["jquery",
 
 		window.SurvivorView = MapView.extend({
 			title: "Survivors",
-			loaded: false,
-			fetch: function() {
-				var me = this;
-				var url = "http://en.collaborativetrust.com/WikiTrust/RemoteAPI?method=wikimarkup&pageid={0}&revid={1}".format(Article.get('pageid'), Article.get('lastrevid'));
-				App.status("Querying WikiTrust...");
-				$.get(url, function(res){
-					App.status();
-					var pattern = /{{#t:[^{}]*}}/gm;
-					var tokens = res.responseText.match(pattern);
-					var editors = _.uniq(_.map(tokens, function(token) {
-						return token.replace("{{", "").replace("}}", "").split(",")[2];
-					}));
-					_.each(editors, function(editor) {
-						var author = Authors.get(editor);
-						author && author.set({survived: true});
-					});
-					Article.calcSignatureDistanceSurvivors();
-
-					me.loaded = true;
-					me.render();
-				});
-			},
 			render: function() {
-				if(this.loaded && _.size(Locations) && _.size(Authors)) {
+				if(CurrentRevision.has('authors')) {
 					this.row(['span-two-thirds', 'span-one-third']);
+					var authors = CurrentRevision.get('authors');
 					locations = Locations.filter(function(loc) {
-						return !!Authors.get(loc.id).get('survived');
+						return _.include(authors, loc.id);
 					});
 					var geoData = _.groupBy(locations, function(loc) {
 						return loc.get('region');
@@ -505,18 +492,19 @@ define(["jquery",
 					this.renderMap(geoCount);
 					this.column(2);
 					this.textarea('Countries ({0})'.format(_.size(geoCount)), geoCount.join('\n'));
-					if(Article.has('sig_dist_survivors')) {
-						this.display("Signature distance", "{0} km".format(Article.get('sig_dist_survivors').toFixed(3)));
+					if(CurrentRevision.has('sig_dist')) {
+						this.display("Signature distance", "{0} km".format(CurrentRevision.get('sig_dist').toFixed(3)));
 					}
 				}
 				return this;
 			}
 		});
+
 		window.AppView = Backbone.View.extend({
 			el: $("body"),
 			events: {
 				"click #clear": "clear",
-				//"click #analyze": "analyzeOnClick",
+				"click #analyze": "analyzeOnClick",
 				"keypress #input": "analyzeOnEnter"
 			},
 			initialize: function() {
@@ -526,6 +514,7 @@ define(["jquery",
 				this.nav = $('.topbar ul.nav');
 
 				window.Article = new Page();
+				window.CurrentRevision = new Revision();
 				window.Authors = new Authorship();
 				window.Revisions = new RevisionCollection();
 				window.Locations = new LocationCollection;
@@ -540,14 +529,17 @@ define(["jquery",
 				Article.bind('change:location', lv.render, lv);
 				Article.bind('change:sig_dist', mv.render, mv);
 				Article.bind('found', av.render, av);
-				Article.bind('found', Revisions.retrieve, Revisions);
+				Article.bind('found', Authors.retrieve, Authors);
 
-				Revisions.bind('loaded', Authors.retrieve, Authors);
-
+				Authors.bind('loaded', Revisions.retrieve, Revisions);
 				Authors.bind('loaded', av.render, av);
-				Authors.bind('loaded', Article.calcSignatureDistance, Article);
 				Authors.bind('loaded', mv.render, mv);
-				Authors.bind('loaded', sv.fetch, sv);
+				Authors.bind('loaded', Article.calcSignatureDistance, Article);
+
+				Revisions.bind('loaded', Revisions.current, Revisions);
+
+				CurrentRevision.bind('change:id', CurrentRevision.fetchAuthors, CurrentRevision);
+				CurrentRevision.bind('change:authors', sv.render, sv);
 			},
 			status: function(msg) {
 				this.statusEl.text(msg || "Ready.");
@@ -561,6 +553,7 @@ define(["jquery",
 				$('a[href!="#"]', this.nav).remove();
 
 				Article.clear({silent: true});
+				CurrentRevision.clear({silent: true});
 				Authors.reset(null, {silent: true});
 				Bots.reset(null, {silent: true});
 				Revisions.reset(null, {silent: true});
@@ -585,7 +578,7 @@ define(["jquery",
 			analyzeOnClick: function(e) {
 				var text = this.input.val();
 				if(text) {
-					analyze(text);
+					this.analyze(text);
 				}
 				return false;
 			},
@@ -596,9 +589,6 @@ define(["jquery",
 				return false;
 			}
 		});
-
-//		var b = new Barticle({title: 'Egypt'});
-//		b.bind('change', c);
 
 	return {
 		init: function() {
