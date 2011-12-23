@@ -287,6 +287,9 @@ define(["jquery",
 			model: Revision,
 			append: true,
 			continue: false,
+			comparator: function(rev) {
+				return rev.get('timestamp');
+			},
 			url: function() {
 				var total = Article.get('count');
 				App.status("Getting revisions {0}...".format(this.status(total)));
@@ -313,7 +316,7 @@ define(["jquery",
 					var next = res['query-continue'].revisions['rvstartid'];
 					this.continue = "&rvstartid={0}".format(next);
 					this.page++;
-					this.retrieve();
+					_.defer(_.bind(this.retrieve, this));
 				} else {
 					this.continue = false;
 				}
@@ -321,7 +324,8 @@ define(["jquery",
 			},
 			fetchAuthors: function() {
 				var rev = this.find(function(r) {
-					return !r.has('authors');
+					return !r.has('authors') 
+						&& Locations.get(r.get('user'));
 				});
 				if(rev) {
 					rev.fetchAuthors();
@@ -508,6 +512,32 @@ define(["jquery",
 			}
 		});
 
+		window.LineChartView = SectionView.extend({
+			title: "Localness",
+			addData: function(model) {
+				if(model.has('sig_dist')) {
+					var row = [new Date(model.get('timestamp')), model.get('sig_dist')];
+					this.table.addRow(row);
+					this.chart.draw(this.table);
+				}
+				this.trigger('update');
+			},
+			initTable: function() {
+				this.table = new google.visualization.DataTable();
+				this.table.addColumn('date', 'Date');
+				this.table.addColumn('number', 'Sd(km)');
+				this.chart = new google.visualization.LineChart(this.div(_.uniqueId("lineChart")));
+				this.chart.draw(this.table, {width: 800});
+			},
+			render: function() {
+				this.row();
+				this.initTable();
+				this.trigger('update');
+				return this;
+			}
+		});
+
+
 		window.AppView = Backbone.View.extend({
 			el: $("body"),
 			events: {
@@ -533,6 +563,7 @@ define(["jquery",
 				var lv = new LocationView();
 				var mv = new MapView();
 				var sv = new SurvivorView();
+				var dv = new LineChartView();
 
 				Article.bind('change:input', Article.retrieve, Article);
 				Article.bind('change:pageid', av.render, av);
@@ -547,7 +578,10 @@ define(["jquery",
 				Authors.bind('loaded', Article.calcSignatureDistance, Article);
 
 				Revisions.bind('loaded', Revisions.current, Revisions);
-				Revisions.bind('loaded', Revisions.fetchAuthors, Revisions);
+				Revisions.bind('loaded', dv.render, dv);
+				Revisions.bind('change:authors', dv.addData, dv);
+
+				dv.bind('update', _.debounce(_.bind(Revisions.fetchAuthors, Revisions), 1500));
 
 				CurrentRevision.bind('change:id', CurrentRevision.fetchAuthors, CurrentRevision);
 				CurrentRevision.bind('change:authors', sv.render, sv);
