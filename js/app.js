@@ -181,7 +181,7 @@ define(["jquery",
 				var url = "http://en.collaborativetrust.com/WikiTrust/RemoteAPI?method=wikimarkup&pageid={0}&revid={1}".format(Article.get('pageid'), this.id);
 				App.status("Authors for text in revision {0}...".format(this.id));
 				$.get(url, function(res){
-					App.status();
+					App.status("Parsing wikitext...");
 					var pattern = /{{#t:[^{}]*}}/gm;
 					var tokens = res.responseText.match(pattern);
 					var editors = _.uniq(_.map(tokens, function(token) {
@@ -191,6 +191,7 @@ define(["jquery",
 				   	if(sd = Authors.signatureDistance(editors)) {
 						me.set({sig_dist: sd});
 					}
+					App.status();
 					me.set({authors: editors});
 				});
 			}
@@ -332,8 +333,8 @@ define(["jquery",
 					rev.fetchAuthors();
 				}
 			},
-			current: function() {
-				var rev = this.get(Article.get("lastrevid"));
+			current: function(id) {
+				var rev = this.get(id && parseInt(id) || Article.get("lastrevid"));
 				CurrentRevision.set(rev.toJSON());
 				return CurrentRevision;
 			}
@@ -358,7 +359,7 @@ define(["jquery",
 					.format(label, rows, value));
 			},
 			header: function() {
-				return '<div class="page-header"><h1>{0}</h1></div>'.format(this.title);
+				return '<div class="page-header"><h1>{0} <small>{1}</small></h1></div>'.format(this.title, this.subtitle || "");
 			},
 			column: function(n) {
 				this.body = this.$('.row div:nth-child({0})'.format(n));
@@ -490,6 +491,8 @@ define(["jquery",
 			title: "Survivors",
 			render: function() {
 				if(CurrentRevision.has('authors')) {
+					var m = CurrentRevision;
+					this.subtitle = "revision: {0} time: {1} user: {2}".format(m.id, m.get('timestamp'), m.get('user'));
 					this.row(['span-two-thirds', 'span-one-third']);
 					var authors = CurrentRevision.get('authors');
 					locations = Locations.filter(function(loc) {
@@ -522,14 +525,23 @@ define(["jquery",
 					this.trigger('update');
 				}
 			},
+			onSelect: function() {
+			},
 			renderTable: function(rows) {
+				var me = this;
 				this.table = new google.visualization.DataTable();
 				this.table.addColumn('date', 'Date');
 				this.table.addColumn('number', 'Sd(km)');
+				this.table.addColumn({type: 'string', role: 'annotationText'});
 				if(rows) {
 					this.table.addRows(rows);
 				}
 				this.chart = new google.visualization.LineChart(this.div(_.uniqueId("lineChart")));
+				google.visualization.events.addListener(this.chart, 'select', function(){
+					var sel = me.chart.getSelection()[0];
+					var revid = me.table.getValue(sel.row, 2);
+					Revisions.current(revid);
+				});
 				this.chart.draw(this.table, {width: 800});
 			}
 		});
@@ -537,9 +549,6 @@ define(["jquery",
 		window.LocalnessView = TimeLineChartView.extend({
 			title: "Localness",
 			prepareRow: function(model) {
-				if(model.has('sig_dist')) {
-					return [new Date(model.get('timestamp')), model.get('sig_dist')];
-				}
 			},
 			render: function() {
 				if(_.size(Revisions)) {
@@ -555,7 +564,7 @@ define(["jquery",
 							return r.get('user');
 						});
 						sd = Authors.signatureDistance(slice);
-						rows.push([new Date(rev.get('timestamp')), sd]);
+						rows.push([new Date(rev.get('timestamp')), sd, "" + rev.id]);
 					});
 					this.renderTable(rows);
 					App.status();
