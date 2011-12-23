@@ -307,7 +307,8 @@ define(["jquery",
 				var page = _.first(_.values(pages));
 				_.each(page.revisions, function(rev) {
 					rev.id = rev.revid;
-					if(loc = Locations.get(rev.username)) {
+					delete rev.comment;
+					if(loc = Locations.get(rev.user)) {
 						rev.location = loc;
 					}
 				});
@@ -513,7 +514,7 @@ define(["jquery",
 		});
 
 		window.TimeLineChartView = SectionView.extend({
-			addData: function(model) {
+			addModel: function(model) {
 				var row;
 			   	if(row = this.prepareRow(model)) {
 					this.table.addRow(row);
@@ -521,18 +522,15 @@ define(["jquery",
 					this.trigger('update');
 				}
 			},
-			initTable: function() {
+			renderTable: function(rows) {
 				this.table = new google.visualization.DataTable();
 				this.table.addColumn('date', 'Date');
 				this.table.addColumn('number', 'Sd(km)');
+				if(rows) {
+					this.table.addRows(rows);
+				}
 				this.chart = new google.visualization.LineChart(this.div(_.uniqueId("lineChart")));
 				this.chart.draw(this.table, {width: 800});
-			},
-			render: function() {
-				this.row();
-				this.initTable();
-				this.trigger('update');
-				return this;
 			}
 		});
 
@@ -542,6 +540,27 @@ define(["jquery",
 				if(model.has('sig_dist')) {
 					return [new Date(model.get('timestamp')), model.get('sig_dist')];
 				}
+			},
+			render: function() {
+				if(_.size(Revisions)) {
+					App.status("Calculating localness (ca. {0} sec.)...".format(_.size(Revisions) >> 8));
+					this.row();
+					var rows = [];
+					var located = Revisions.filter(function(rev) {
+						return rev.has('location');
+					});
+					var sd, slice;
+					_.each(located, function(rev, index) {
+						slice = _.map(located.slice(0, index+1), function(r) {
+							return r.get('user');
+						});
+						sd = Authors.signatureDistance(slice);
+						rows.push([new Date(rev.get('timestamp')), sd]);
+					});
+					this.renderTable(rows);
+					App.status();
+				}
+				return this;
 			}
 		});
 
@@ -587,9 +606,8 @@ define(["jquery",
 
 				Revisions.bind('loaded', Revisions.current, Revisions);
 				Revisions.bind('loaded', dv.render, dv);
-				Revisions.bind('change:authors', dv.addData, dv);
-
-				dv.bind('update', _.debounce(_.bind(Revisions.fetchAuthors, Revisions), 1500));
+				//Revisions.bind('change:authors', dv.addData, dv);
+				//dv.bind('update', _.debounce(_.bind(Revisions.fetchAuthors, Revisions), 1500));
 
 				CurrentRevision.bind('change:id', CurrentRevision.fetchAuthors, CurrentRevision);
 				CurrentRevision.bind('change:authors', sv.render, sv);
