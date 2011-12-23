@@ -42,7 +42,7 @@ define(["jquery",
 			limit: 500,
 			page: 1,
 			status: function(total) {
-				var pages = Math.ceil(total/(this.limit-1));
+				var pages = Math.ceil(total/(this.limit));
 				return "{0}/{1}".format(this.page, pages);
 			},
 			sync: function(method, me, options) {
@@ -290,7 +290,7 @@ define(["jquery",
 			url: function() {
 				var total = Article.get('count');
 				App.status("Getting revisions {0}...".format(this.status(total)));
-				var offset = this.continue ? "&rvstart=" + this.continue : "";
+				var offset = this.continue || "";
 				return "http://en.wikipedia.org/w/api.php?action=query&prop=revisions&format=json&redirects&callback=?&rvlimit=500&pageids=" + Article.get('pageid') + offset;
 			},
 			parse: function(res) {
@@ -309,9 +309,9 @@ define(["jquery",
 					}
 				});
 				App.status();
-				if(page.revisions.length == 500) {
-					var last = page.revisions.pop();
-					this.continue = last.timestamp;
+				if(res['query-continue']) {
+					var next = res['query-continue'].revisions['rvstartid'];
+					this.continue = "&rvstartid={0}".format(next);
 					this.page++;
 					this.retrieve();
 				} else {
@@ -319,21 +319,12 @@ define(["jquery",
 				}
 				return page.revisions;
 			},
-			updateAuthor: function(author) {
-				this.each(function(rev) {
-					if(rev.get('user') == author.id) {
-						rev.set({author: author});
-					}
-				});
-			},
-			updateLocation: function(ts, user, loc) {
+			fetchAuthors: function() {
 				var rev = this.find(function(r) {
-					return r.get('user') == user && r.get('timestamp') == ts;
+					return !r.has('authors');
 				});
 				if(rev) {
-					rev.set({location: loc});
-				} else {
-					c("Could not update location for user " + user);
+					rev.fetchAuthors();
 				}
 			},
 			current: function() {
@@ -556,6 +547,7 @@ define(["jquery",
 				Authors.bind('loaded', Article.calcSignatureDistance, Article);
 
 				Revisions.bind('loaded', Revisions.current, Revisions);
+				Revisions.bind('loaded', Revisions.fetchAuthors, Revisions);
 
 				CurrentRevision.bind('change:id', CurrentRevision.fetchAuthors, CurrentRevision);
 				CurrentRevision.bind('change:authors', sv.render, sv);
