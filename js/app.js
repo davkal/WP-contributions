@@ -45,11 +45,28 @@ define(["jquery",
 				var pages = Math.ceil(total/(this.limit-1));
 				return "{0}/{1}".format(this.page, pages);
 			},
+			sync: function(method, me, options) {
+				var key = this.url();
+				var cached = localStorage.getItem(key);
+				if(cached) {
+					options.success.call(this, JSON.parse(cached));
+				} else {
+					return Backbone.sync.call(this, method, this, options);
+				}
+			},
 			retrieve: function() {
 				var me = this;
+				var key = this.url();
 				me.fetch({
 					add: !!me.append,
-					success: function(res) {
+					success: function(col, res) {
+						try { 
+							localStorage.setItem(key, JSON.stringify(res));
+						} 
+						catch(e) {
+							console.log("Quota exceeded. Throwing all away...");
+							localStorage.clear();
+						}
 						if(!me.continue) {
 							me.trigger(me.loaded || 'loaded');
 						}
@@ -504,12 +521,14 @@ define(["jquery",
 			el: $("body"),
 			events: {
 				"click #clear": "clear",
+				"click #cache": "clearCache",
 				"click #analyze": "analyzeOnClick",
 				"keypress #input": "analyzeOnEnter"
 			},
 			initialize: function() {
 				this.input = this.$("#input");
 				this.statusEl = $('#status');
+				this.cache = $('#cache');
 				this.container = $('#content .container');
 				this.nav = $('.topbar ul.nav');
 
@@ -542,7 +561,12 @@ define(["jquery",
 				CurrentRevision.bind('change:authors', sv.render, sv);
 			},
 			status: function(msg) {
+				var size = JSON.stringify(localStorage).length / 1024 / 1024;
+				this.cache.text("Cache {0} MB".format(size.toFixed(2)));
 				this.statusEl.text(msg || "Ready.");
+			},
+			clearCache: function() {
+				localStorage.clear();
 			},
 			clear: function() {
 				this.status();
@@ -557,6 +581,7 @@ define(["jquery",
 				Authors.reset(null, {silent: true});
 				Bots.reset(null, {silent: true});
 				Revisions.reset(null, {silent: true});
+				Revisions.page = 1;
 				Locations.reset(null, {silent: true});
 			},
 			link: function(sec) {
