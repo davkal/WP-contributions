@@ -512,15 +512,14 @@ define(["jquery",
 			}
 		});
 
-		window.LineChartView = SectionView.extend({
-			title: "Localness",
+		window.TimeLineChartView = SectionView.extend({
 			addData: function(model) {
-				if(model.has('sig_dist')) {
-					var row = [new Date(model.get('timestamp')), model.get('sig_dist')];
+				var row;
+			   	if(row = this.prepareRow(model)) {
 					this.table.addRow(row);
 					this.chart.draw(this.table);
+					this.trigger('update');
 				}
-				this.trigger('update');
 			},
 			initTable: function() {
 				this.table = new google.visualization.DataTable();
@@ -534,6 +533,15 @@ define(["jquery",
 				this.initTable();
 				this.trigger('update');
 				return this;
+			}
+		});
+
+		window.LocalnessView = TimeLineChartView.extend({
+			title: "Localness",
+			prepareRow: function(model) {
+				if(model.has('sig_dist')) {
+					return [new Date(model.get('timestamp')), model.get('sig_dist')];
+				}
 			}
 		});
 
@@ -563,7 +571,7 @@ define(["jquery",
 				var lv = new LocationView();
 				var mv = new MapView();
 				var sv = new SurvivorView();
-				var dv = new LineChartView();
+				var dv = new LocalnessView();
 
 				Article.bind('change:input', Article.retrieve, Article);
 				Article.bind('change:pageid', av.render, av);
