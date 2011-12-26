@@ -38,9 +38,14 @@ define(["jquery",
 		});
 
 		window.Collection = Backbone.Collection.extend({
-			continue: false,
+			continue: true,
+			append: true,
 			limit: 500,
 			page: 1,
+			offset: null,
+			initialize: function(models, options) {
+				_.extend(this, options || {});
+			},
 			status: function(total) {
 				var pages = Math.ceil(total/(this.limit));
 				return "{0}/{1}".format(this.page, pages);
@@ -67,7 +72,7 @@ define(["jquery",
 							console.log("Quota exceeded. Throwing all away...");
 							localStorage.clear();
 						}
-						if(!me.continue) {
+						if(!me.offset) {
 							me.trigger(me.loaded || 'loaded');
 						}
 					}
@@ -146,10 +151,18 @@ define(["jquery",
 		});
 
 		window.Page = Model.extend({
+			defaults: {
+				'lang': 'en',
+				'full_text': false
+			},
 			loaded: 'found',
 			url: function() {
 				App.status("Querying en.wikipedia.org...");
-				return "http://en.wikipedia.org/w/api.php?action=query&prop=info&format=json&redirects&callback=?&export&titles=" + encodeURI(this.get('input'));
+				var url = "http://{0}.wikipedia.org/w/api.php?action=query&prop=info&format=json&redirects&callback=?&titles={1}".format(this.get('lang'), encodeURI(this.get('input')));
+				if(this.get('full_text')) {
+					url += "&export";
+				}
+				return url;
 			},
 			calcSignatureDistance: function() {
 				if(this.has('location')) {
@@ -164,12 +177,14 @@ define(["jquery",
 				}
 				App.status("Loaded article info.");
 				var page = _.first(_.values(pages));
-				var xml = $.parseXML(res.query.export['*']);
-				var text = $(xml).find('text').text();
-				page['text'] = text;
-				var loc;
-				if(loc = Location.parseText(text)) {
-					page['location'] = loc;
+				if(res.query.export) {
+					var xml = $.parseXML(res.query.export['*']);
+					var text = $(xml).find('text').text();
+					page['text'] = text;
+					var loc;
+					if(loc = Location.parseText(text)) {
+						page['location'] = loc;
+					}
 				}
 				return page;
 			}
@@ -286,16 +301,20 @@ define(["jquery",
 		});
 		window.RevisionCollection = Collection.extend({
 			model: Revision,
-			append: true,
-			continue: false,
+			offset: null,
 			comparator: function(rev) {
 				return rev.get('timestamp');
 			},
 			url: function() {
-				var total = Article.get('count');
-				App.status("Getting revisions {0}...".format(this.status(total)));
-				var offset = this.continue || "";
-				return "http://en.wikipedia.org/w/api.php?action=query&prop=revisions&format=json&redirects&callback=?&rvlimit=500&pageids=" + Article.get('pageid') + offset;
+				var article = this.article || Article;
+				if(article.has('count')) {
+					var total = Article.get('count');
+					App.status("Getting revisions {0}...".format(this.status(total)));
+				}
+				var offset = this.offset || "";
+				var identifier = article.has('pageid') ? "pageids=" + article.get('pageid') : "titles=" + encodeURI(article.get('title'));
+				var url = "http://{0}.wikipedia.org/w/api.php?action=query&prop=revisions&format=json&redirects&callback=?&rvdir=newer&rvlimit={1}&{2}{3}".format(article.get('lang'), this.limit, identifier, offset);
+				return url;
 			},
 			parse: function(res) {
 				var pages = res.query.pages;
@@ -314,13 +333,13 @@ define(["jquery",
 					}
 				});
 				App.status();
-				if(res['query-continue']) {
+				if(this.continue && res['query-continue']) {
 					var next = res['query-continue'].revisions['rvstartid'];
-					this.continue = "&rvstartid={0}".format(next);
+					this.offset = "&rvstartid={0}".format(next);
 					this.page++;
 					_.defer(_.bind(this.retrieve, this));
 				} else {
-					this.continue = false;
+					this.offset = null;
 				}
 				return page.revisions;
 			},
@@ -340,6 +359,41 @@ define(["jquery",
 			}
 		});
 
+		window.LanguageCollection = Collection.extend({
+			url : function() {
+				return "http://{0}.wikipedia.org/w/api.php?action=query&prop=langlinks&format=json&lllimit=500&callback=?&pageids={1}".format(Article.get('lang'), Article.get('pageid'));
+			},
+			fetchNext: function() {
+				var article = this.find(function(a) {
+					return !a.has('revisions');
+				});
+				if(article) {
+					var revisions = new RevisionCollection([], {
+						article: article, 
+						continue: false,
+						limit: 10
+					});
+					revisions.bind('loaded', function() {
+						article.set({revisions: revisions});
+					});
+					revisions.retrieve();
+				}
+			},
+			parse: function(res) {
+				var pages = res.query.pages;
+				var page = _.first(_.values(pages));
+				// BEWARE: this isnt a full clique
+				var articles = [{
+					title: Article.get('title'),
+					lang: Article.get('lang')
+				}];
+				_.each(page.langlinks, function(ll) {
+					articles.push(new Page({title: ll['*'], lang: ll.lang}));
+				});
+				return articles;
+			}
+		});
+
 		window.SectionView = Backbone.View.extend({
 			initialize: function() {
 				this.id = this.id || this.title.toLowerCase();
@@ -354,9 +408,10 @@ define(["jquery",
 				this.form.append('<div class="clearfix"><label>' + label + '</label><div class="input"><p>' + value + '</p></div></div>');
 			},
 			textarea: function(label, value, rows) {
-				rows = rows || 8;
+				rows = rows || 7;
 				this.form.append('<div class="clearfix"><label>{0}</label><div class="input"><textarea class="xlarge" rows="{1}">{2}</textarea></div></div>'
 					.format(label, rows, value));
+				return $('textarea', this.form).last();
 			},
 			header: function() {
 				return '<div class="page-header"><h1>{0} <small>{1}</small></h1></div>'.format(this.title, this.subtitle || "");
@@ -364,6 +419,9 @@ define(["jquery",
 			column: function(n) {
 				this.body = this.$('.row div:nth-child({0})'.format(n));
 				this.form = $('form', this.body);
+			},
+			subview: function(cls) {
+				var view = new cls({el: $(this.form)});
 			},
 			row: function(spans) {
 				spans = spans || ['span10'];
@@ -378,6 +436,44 @@ define(["jquery",
 				this.column(1);
 				App.link(this);
 				return this;
+			}
+		});
+
+		window.FieldView = SectionView.extend({
+			initialize: function() {
+				this.form = this.el;
+				if(this.model) {
+					this.render();
+				} else {
+					this.fetch();
+				}
+			}
+		});
+
+		window.LanguageView = FieldView.extend({
+			fetch: function() {
+				window.Languages = this.model = new LanguageCollection();
+				this.model.bind('loaded', this.render, this);
+				this.model.bind('change', this.render, this);
+				this.model.retrieve();
+			},
+			render: function() {
+				if(this.model) {
+					if(!this.field) {
+						this.field = this.textarea("Languages ({0})".format(_.size(this.model)), "");
+					}
+					var loaded = this.model.filter(function(a) {
+						return a.has('revisions');
+					});
+					loaded = _.sortBy(loaded, function(a) {
+						return a.get('revisions').first().get('timestamp');
+					});
+					var list = _.map(loaded, function(a) {
+						return "{0}: {1}".format(a.get('lang'), a.get('revisions').first().get('timestamp'));
+					});
+					this.field.val(list.join("\n"));
+					this.model.fetchNext();
+				}
 			}
 		});
 
@@ -414,6 +510,7 @@ define(["jquery",
 					this.textarea('Content ({0})'.format(Article.get('length')), Article.get('text'));
 					this.column(3);
 					this.textarea('Located ({0})'.format(_.size(located)), located.join('\n'));
+					this.subview(LanguageView);
 				}
 
 				return this;
@@ -589,7 +686,7 @@ define(["jquery",
 				this.container = $('#content .container');
 				this.nav = $('.topbar ul.nav');
 
-				window.Article = new Page();
+				window.Article = new Page({full_text: true});
 				window.CurrentRevision = new Revision();
 				window.Authors = new Authorship();
 				window.Revisions = new RevisionCollection();
@@ -637,6 +734,8 @@ define(["jquery",
 					.removeClass('error');
 				$('a[href!="#"]', this.nav).remove();
 
+				return; 
+				// FIXME clear() deletes also defaults
 				Article.clear({silent: true});
 				CurrentRevision.clear({silent: true});
 				Authors.reset(null, {silent: true});
