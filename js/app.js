@@ -86,6 +86,10 @@ define(["jquery",
 			}
 		}, {
 			patterns: {
+				"(-?[\\d\\.]+);\\s*(-?[\\d\\.]+)": function(match) {
+					return [parseFloat(match[1]),
+							parseFloat(match[2])]
+				},
 				"{{coord\\|(\\d+)\\|(\\d+)\\|([\\d\\.]+)\\|([NS])\\|(\\d+)\\|(\\d+)\\|([\\d\\.]+)\\|([EW])\\|": function(match) {
 					var ns = match[4] == 'S' ? -1 : 1;
 					var ew = match[8] == 'W' ? -1 : 1;
@@ -169,6 +173,55 @@ define(["jquery",
 					this.set({sig_dist: Authors.signatureDistance()});
 				}
 			},
+			checkDates: function() {
+				// check parsed templates of dates have not been found yet
+				if(!this.has('start') && this.has('templates')) {
+					var infobox = this.get('templates').findByType('infobox');
+					if(infobox) {
+						var period = infobox.period();
+						if(period && period.length == 2) {
+							this.set({
+								start: period[0],
+								end: period[1]
+							});
+						}
+					}
+				}
+			},
+			fetchAdditionalData: function() {
+				var me = this;
+				var url = "http://{0}.wikipedia.org/w/api.php?action=parse&format=json&callback=?&pageid={1}".format(this.get('lang'), this.get('pageid'));
+				App.status("Getting parsed wikitext...");
+				$.getJSON(url, function(res){
+					App.status("Extracting page features...");
+					var attr = {};
+					attr.text = "<text>{0}</text>".format(res.parse.text['*']);
+					var infobox = $(attr.text).find('.infobox').first();
+					var start = $('.dtstart', infobox);
+					if(start = start.text()) {
+						attr.start = start;
+					}
+					var end = $('.dtend', infobox);
+					if(end = end.text()) {
+						attr.end = end;
+					}
+					var location = $('.geo-nondefault .geo', infobox).first();
+					if(location = Location.parseText(location.text())) {
+						attr.location = location;
+					}
+					attr.languages = new LanguageCollection([{
+						title: me.get('title'),
+						lang: me.get('lang')
+					}]);
+					// BEWARE: this isnt a full clique
+					_.each(res.parse.langlinks, function(ll) {
+						attr.languages.add({title: ll['*'], lang: ll.lang});
+					});
+					me.checkDates();
+					me.set(attr);
+					me.trigger('additional');
+				});
+			},
 			parse: function(res) {
 				var pages = res.query.pages;
 				if(pages["-1"]) {
@@ -180,11 +233,8 @@ define(["jquery",
 				if(res.query.export) {
 					var xml = $.parseXML(res.query.export['*']);
 					var text = $(xml).find('text').text();
-					page['text'] = text;
-					var loc;
-					if(loc = Location.parseText(text)) {
-						page['location'] = loc;
-					}
+					page.wikitext = text;
+					page.templates = Templates.fromText(text);
 				}
 				return page;
 			}
@@ -213,6 +263,49 @@ define(["jquery",
 		});
 
 		window.Author = Model.extend({});
+
+		window.Template = Model.extend({
+			period: function() {
+				var m;
+			   	if(m = this.match(/\|\s*date\s*=\s*([^-–|]*)\s*[-–]\s*([^-–|]*)\s*\|/)) {
+					return m
+				}
+			},
+			match: function(reg) {
+				var m = this.get('content').match(reg); 
+				return m && _.map(m.slice(1), function(s) {
+					return s.trim();
+				});
+			}
+		});
+
+		window.Templates = Collection.extend({
+			model: Template,
+			findByType: function(type) {
+				return this.find(function(t) {
+					return t.has('type') && t.get('type').toLowerCase().startsWith(type);
+				});
+			}
+		}, {
+			fromText: function(text) {
+				var t = "<text>{0}</text>".format(text
+					.replace(/{{/g, "<template>")
+					.replace(/}}/g, "</template>"));
+				var templates = $(t).find('template');
+				templates = _.map(templates, function(temp) {
+					var content = $(temp).text();
+					var stop = content.indexOf("|");
+					var obj = {
+						content: content
+					};
+					if(stop > 0) {
+						obj.type = content.slice(0, stop);
+					}
+					return obj;
+				});
+				return new Templates(templates);
+			}
+		});
 
 		window.Authorship = Collection.extend({
 			model: Author,
@@ -353,16 +446,14 @@ define(["jquery",
 				}
 			},
 			current: function(id) {
-				var rev = this.get(id && parseInt(id) || Article.get("lastrevid"));
+				var rev = id && this.get(parseInt(id)) || this.last();
 				CurrentRevision.set(rev.toJSON());
 				return CurrentRevision;
 			}
 		});
 
 		window.LanguageCollection = Collection.extend({
-			url : function() {
-				return "http://{0}.wikipedia.org/w/api.php?action=query&prop=langlinks&format=json&lllimit=500&callback=?&pageids={1}".format(Article.get('lang'), Article.get('pageid'));
-			},
+			model: Page,
 			fetchNext: function() {
 				var article = this.find(function(a) {
 					return !a.has('revisions');
@@ -378,19 +469,6 @@ define(["jquery",
 					});
 					revisions.retrieve();
 				}
-			},
-			parse: function(res) {
-				var pages = res.query.pages;
-				var page = _.first(_.values(pages));
-				// BEWARE: this isnt a full clique
-				var articles = [{
-					title: Article.get('title'),
-					lang: Article.get('lang')
-				}];
-				_.each(page.langlinks, function(ll) {
-					articles.push(new Page({title: ll['*'], lang: ll.lang}));
-				});
-				return articles;
 			}
 		});
 
@@ -407,6 +485,9 @@ define(["jquery",
 			display: function(label, value) {
 				this.form.append('<div class="clearfix"><label>' + label + '</label><div class="input"><p>' + value + '</p></div></div>');
 			},
+			link: function(label, value, href) {
+				this.display(label, '<a href="{0}" target="_blank">{1}</a>'.format(href, value));
+			},
 			textarea: function(label, value, rows) {
 				rows = rows || 7;
 				this.form.append('<div class="clearfix"><label>{0}</label><div class="input"><textarea class="xlarge" rows="{1}">{2}</textarea></div></div>'
@@ -420,8 +501,8 @@ define(["jquery",
 				this.body = this.$('.row div:nth-child({0})'.format(n));
 				this.form = $('form', this.body);
 			},
-			subview: function(cls) {
-				var view = new cls({el: $(this.form)});
+			subview: function(cls, model) {
+				return new cls({el: $(this.form), model: model});
 			},
 			row: function(spans) {
 				spans = spans || ['span10'];
@@ -443,6 +524,7 @@ define(["jquery",
 			initialize: function() {
 				this.form = this.el;
 				if(this.model) {
+					this.model.bind('change', this.render, this);
 					this.render();
 				} else {
 					this.fetch();
@@ -451,12 +533,6 @@ define(["jquery",
 		});
 
 		window.LanguageView = FieldView.extend({
-			fetch: function() {
-				window.Languages = this.model = new LanguageCollection();
-				this.model.bind('loaded', this.render, this);
-				this.model.bind('change', this.render, this);
-				this.model.retrieve();
-			},
 			render: function() {
 				if(this.model) {
 					if(!this.field) {
@@ -483,7 +559,7 @@ define(["jquery",
 				this.row(['span-one-third', 'span-one-third', 'span-one-third']);
 				var m = Article;
 				var text, obj;
-				this.display("Title", m.get('title'));
+				this.link("Title", m.get('title'), "http://{0}.wikipedia.org/wiki/{1}".format(m.get('lang'), m.get('title')));
 				this.display("Article ID", m.get('pageid'));
 				if(m.has("first_edit")) {
 					obj = m.get('first_edit');
@@ -510,16 +586,15 @@ define(["jquery",
 					this.textarea('Content ({0})'.format(Article.get('length')), Article.get('text'));
 					this.column(3);
 					this.textarea('Located ({0})'.format(_.size(located)), located.join('\n'));
-					this.subview(LanguageView);
+					var lv = this.subview(LanguageView, Article.get('languages'));
 				}
 
 				return this;
 			}
 		});
 
-		window.LocationView = SectionView.extend({
-			title: "Article Location",
-			id: "location",
+		window.PropertiesView = SectionView.extend({
+			title: "Properties",
 			renderMap: function(loc) {
 				var myLatlng = new google.maps.LatLng(loc.get('latitude'), loc.get('longitude'));
 				var myOptions = {
@@ -539,12 +614,17 @@ define(["jquery",
 			},
 			render: function() {
 				var loc = Article.get('location');
-				if(loc) {
+				var start = Article.get('start');
+				var end = Article.get('end');
+				if(loc || end || start) {
 					this.row(['span-two-thirds', 'span-one-third']);
-					this.renderMap(loc);
-					this.column(2);
-					this.display('Latitude', loc.get('latitude').toFixed(3));
-					this.display('Longitude', loc.get('longitude').toFixed(3));
+					if(loc) {
+						this.renderMap(loc);
+						this.column(2);
+						this.display('Location', "{0}; {1}".format(loc.get('latitude').toFixed(3), loc.get('longitude').toFixed(3)));
+					}
+					start && this.display('Start', start);
+					end && this.display('End/Status', end);
 				}
 				return this;
 			}
@@ -648,7 +728,7 @@ define(["jquery",
 			prepareRow: function(model) {
 			},
 			render: function() {
-				if(_.size(Revisions)) {
+				if(_.size(Revisions) && Article.has('location')) {
 					App.status("Calculating localness (ca. {0} sec.)...".format(_.size(Revisions) >> 8));
 					this.row();
 					var rows = [];
@@ -670,6 +750,12 @@ define(["jquery",
 			}
 		});
 
+		// TODO start/stop of event
+		// TODO parse country of event
+		// TODO compare localness of other languages
+		// TODO userpages/talk-userpages
+		// TODO getting userpages annotated
+		// TODO you are where you edit
 
 		window.AppView = Backbone.View.extend({
 			el: $("body"),
@@ -693,17 +779,18 @@ define(["jquery",
 				window.Locations = new LocationCollection;
 
 				var av = new Overview();
-				var lv = new LocationView();
+				var pv = new PropertiesView();
 				var mv = new MapView();
 				var sv = new SurvivorView();
 				var dv = new LocalnessView();
 
 				Article.bind('change:input', Article.retrieve, Article);
+				Article.bind('change:pageid', Article.fetchAdditionalData, Article);
 				Article.bind('change:pageid', av.render, av);
-				Article.bind('change:location', lv.render, lv);
+				Article.bind('change:location', pv.render, pv);
 				Article.bind('change:sig_dist', mv.render, mv);
 				Article.bind('found', av.render, av);
-				Article.bind('found', Authors.retrieve, Authors);
+				Article.bind('additional', Authors.retrieve, Authors);
 
 				Authors.bind('loaded', Revisions.retrieve, Revisions);
 				Authors.bind('loaded', av.render, av);
