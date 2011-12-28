@@ -594,7 +594,8 @@ define(["jquery",
 		});
 
 		window.PropertiesView = SectionView.extend({
-			title: "Properties",
+			id: "properties",
+			title: "Article properties",
 			renderMap: function(loc) {
 				var myLatlng = new google.maps.LatLng(loc.get('latitude'), loc.get('longitude'));
 				var myOptions = {
@@ -615,16 +616,18 @@ define(["jquery",
 			render: function() {
 				var loc = Article.get('location');
 				var start = Article.get('start');
-				var end = Article.get('end');
-				if(loc || end || start) {
+				var end = Article.get('end') || 'ongoing';
+				if(loc || start) {
 					this.row(['span-two-thirds', 'span-one-third']);
 					if(loc) {
 						this.renderMap(loc);
 						this.column(2);
 						this.display('Location', "{0}; {1}".format(loc.get('latitude').toFixed(3), loc.get('longitude').toFixed(3)));
 					}
-					start && this.display('Start', start);
-					end && this.display('End/Status', end);
+					if(start) {
+						this.display('Start', start);
+						this.display('End/Status', end);
+					}
 				}
 				return this;
 			}
@@ -735,14 +738,20 @@ define(["jquery",
 					var located = Revisions.filter(function(rev) {
 						return rev.has('location');
 					});
-					var sd, slice;
+					var sd, slice, loc, dist;
+					var s = new Date();
+					var localness = _.memoize(function(i, list) {
+						dist = list[i].get('location').get('distance');
+						if(i == 0) {
+							return dist;
+						}
+						return (dist + (i- 1) * localness(i - 1, list)) / i;
+					});
 					_.each(located, function(rev, index) {
-						slice = _.map(located.slice(0, index+1), function(r) {
-							return r.get('user');
-						});
-						sd = Authors.signatureDistance(slice);
+						sd = localness(index, located);
 						rows.push([new Date(rev.get('timestamp')), sd, "" + rev.id]);
 					});
+					c(new Date() - s);
 					this.renderTable(rows);
 					App.status();
 				}
@@ -763,6 +772,7 @@ define(["jquery",
 				"click #clear": "clear",
 				"click #cache": "clearCache",
 				"click #analyze": "analyzeOnClick",
+				"click .example": "analyzeExample",
 				"keypress #input": "analyzeOnEnter"
 			},
 			initialize: function() {
@@ -846,6 +856,10 @@ define(["jquery",
 			analyze: function(input) {
 				this.clear();
 				Article.set({input: input});
+			},
+			analyzeExample: function(e) {
+				this.input.val($(e.target).attr("title"));
+				return this.analyzeOnClick();
 			},
 			analyzeOnClick: function(e) {
 				var text = this.input.val();
