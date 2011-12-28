@@ -27,6 +27,13 @@ define(["jquery",
 		}
 
 		window.Model = Backbone.Model.extend({
+			checkDate: function(obj, attr) {
+				var d = obj[attr];
+				if(d) {
+					obj[attr] = new Date(d);
+				}
+				return !d || !isNaN(obj[attr].getTime());
+			},
 			retrieve: function() {
 				var me = this;
 				me.fetch({
@@ -160,6 +167,11 @@ define(["jquery",
 				'full_text': false
 			},
 			loaded: 'found',
+			validate: function(attrs) {
+				if(!this.checkDate(attrs, 'start') || !this.checkDate(attrs, 'end')) {
+					return 'wrong date format';
+				}
+			},
 			url: function() {
 				App.status("Querying en.wikipedia.org...");
 				var url = "http://{0}.wikipedia.org/w/api.php?action=query&prop=info&format=json&redirects&callback=?&titles={1}".format(this.get('lang'), encodeURI(this.get('input')));
@@ -173,6 +185,15 @@ define(["jquery",
 					this.set({sig_dist: Authors.signatureDistance()});
 				}
 			},
+			phase: function() {
+				if(this.has('start')) {
+					if(this.has('end')) {
+						return 2; // ended
+					}
+					return 1; // ongoing
+				} 
+				return 0; // w/o interval
+			},
 			checkDates: function() {
 				// check parsed templates of dates have not been found yet
 				if(!this.has('start') && this.has('templates')) {
@@ -180,10 +201,8 @@ define(["jquery",
 					if(infobox) {
 						var period = infobox.period();
 						if(period && period.length == 2) {
-							this.set({
-								start: period[0],
-								end: period[1]
-							});
+							this.set({start: period[0]});
+							this.set({end: period[1]});
 						}
 					}
 				}
@@ -559,11 +578,12 @@ define(["jquery",
 				this.row(['span-one-third', 'span-one-third', 'span-one-third']);
 				var m = Article;
 				var text, obj;
-				this.link("Title", m.get('title'), "http://{0}.wikipedia.org/wiki/{1}".format(m.get('lang'), m.get('title')));
+				this.link("Title", "{0} ({1})".format(m.get('title'), m.get('lang')), "http://{0}.wikipedia.org/wiki/{1}".format(m.get('lang'), m.get('title')));
 				this.display("Article ID", m.get('pageid'));
 				if(m.has("first_edit")) {
 					obj = m.get('first_edit');
 					text = "{0} by {1}".format($.format.date(new Date(obj.timestamp * 1000), "yyyy-MM-dd hh:mm:ss"), obj.user);
+					// FIXME timestamp is not UTC
 					this.display("Created", text);
 					this.display('Revision count', "{0} ({1} minor, {2} anonymous)"
 							.format(m.get('count'), m.get('minor_count'), m.get('anon_count')));
@@ -616,7 +636,7 @@ define(["jquery",
 			render: function() {
 				var loc = Article.get('location');
 				var start = Article.get('start');
-				var end = Article.get('end') || 'ongoing';
+				var end = Article.get('end');
 				if(loc || start) {
 					this.row(['span-two-thirds', 'span-one-third']);
 					if(loc) {
@@ -625,8 +645,8 @@ define(["jquery",
 						this.display('Location', "{0}; {1}".format(loc.get('latitude').toFixed(3), loc.get('longitude').toFixed(3)));
 					}
 					if(start) {
-						this.display('Start', start);
-						this.display('End/Status', end);
+						this.display('Start', $.format.date(start, "yyyy-MM-dd"));
+						this.display('End/Status', end ? $.format.date(end, "yyyy-MM-dd") : 'ongoing');
 					}
 				}
 				return this;
@@ -738,8 +758,8 @@ define(["jquery",
 					var located = Revisions.filter(function(rev) {
 						return rev.has('location');
 					});
-					var sd, slice, loc, dist;
-					var s = new Date();
+					var sd, dist;
+					// incremental signature distance
 					var localness = _.memoize(function(i, list) {
 						dist = list[i].get('location').get('distance');
 						if(i == 0) {
@@ -751,7 +771,6 @@ define(["jquery",
 						sd = localness(index, located);
 						rows.push([new Date(rev.get('timestamp')), sd, "" + rev.id]);
 					});
-					c(new Date() - s);
 					this.renderTable(rows);
 					App.status();
 				}
@@ -759,7 +778,6 @@ define(["jquery",
 			}
 		});
 
-		// TODO start/stop of event
 		// TODO parse country of event
 		// TODO compare localness of other languages
 		// TODO userpages/talk-userpages
@@ -831,15 +849,14 @@ define(["jquery",
 					.removeClass('error');
 				$('a[href!="#"]', this.nav).remove();
 
-				return; 
-				// FIXME clear() deletes also defaults
-				Article.clear({silent: true});
-				CurrentRevision.clear({silent: true});
-				Authors.reset(null, {silent: true});
-				Bots.reset(null, {silent: true});
-				Revisions.reset(null, {silent: true});
-				Revisions.page = 1;
-				Locations.reset(null, {silent: true});
+				Article.unbind();
+				CurrentRevision.unbind();
+				Authors.unbind();
+				Bots.unbind();
+				Revisions.unbind();
+				Locations.unbind();
+
+				this.initialize();
 			},
 			link: function(sec) {
 				if(!$('a[href="#{0}"]'.format(sec.id), this.nav).length) {
@@ -854,7 +871,9 @@ define(["jquery",
 				App.status(text);
 			}, 
 			analyze: function(input) {
-				this.clear();
+				if(Article.has('input')) {
+					this.clear();
+				}
 				Article.set({input: input});
 			},
 			analyzeExample: function(e) {
