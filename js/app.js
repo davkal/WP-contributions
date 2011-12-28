@@ -420,8 +420,10 @@ define(["jquery",
 			url: function() {
 				var article = this.article || Article;
 				if(article.has('count')) {
-					var total = Article.get('count');
+					var total = article.get('count');
 					App.status("Getting revisions {0}...".format(this.status(total)));
+				} else {
+					App.status("Getting revisions for language {0}...".format(article.get('lang')));
 				}
 				var offset = this.offset || "";
 				var identifier = article.has('pageid') ? "pageids=" + article.get('pageid') : "titles=" + encodeURI(article.get('title'));
@@ -434,7 +436,6 @@ define(["jquery",
 					App.error("Invalid article.");
 					return;
 				}
-				App.status("Parsing revisions...");
 				var loc;
 				var page = _.first(_.values(pages));
 				_.each(page.revisions, function(rev) {
@@ -444,7 +445,6 @@ define(["jquery",
 						rev.location = loc;
 					}
 				});
-				App.status();
 				if(this.continue && res['query-continue']) {
 					var next = res['query-continue'].revisions['rvstartid'];
 					this.offset = "&rvstartid={0}".format(next);
@@ -453,6 +453,7 @@ define(["jquery",
 				} else {
 					this.offset = null;
 				}
+				App.status();
 				return page.revisions;
 			},
 			fetchAuthors: function() {
