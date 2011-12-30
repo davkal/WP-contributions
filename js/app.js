@@ -3,13 +3,15 @@ define(["jquery",
 		"underscore", 
 		"backbone", 
 		"countries", 
+		"bots", 
 		'async!http://maps.google.com/maps/api/js?sensor=false',
 		'goog!visualization,1,packages:[corechart,geochart]'
-	], function($, dateFormat, _, Backbone, countries) {
+	], function($, dateFormat, _, Backbone, countries, bots) {
 
 		window.c = function() {
 			console.log(arguments);
 		};
+
 
 		window.CountryCollection = Backbone.Collection.extend({
 			initialize: function() {
@@ -201,7 +203,7 @@ define(["jquery",
 			},
 			loaded: 'found',
 			isMain: function() {
-				return this == Article;
+				return this == window.Article;
 			},
 			validate: function(attrs) {
 				if(!this.checkDate(attrs, 'start') || !this.checkDate(attrs, 'end')) {
@@ -356,7 +358,16 @@ define(["jquery",
 			}
 		});
 
-		window.Author = Model.extend({});
+		window.Author = Model.extend({
+			defaults: {
+				ip: false
+			},
+			initialize: function() {
+				if(this.id.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)) {
+					this.set({ip: true});
+				}
+			}
+		});
 
 		window.Template = Model.extend({
 			period: function() {
@@ -461,22 +472,27 @@ define(["jquery",
 				});
 
 				// adding all editors
-				var editors = [], author;
+				var editors = [], author, bot;
 				_.each(res.editors, function(obj, name) {
-					if(name.toLowerCase().endsWith('bot')) {
-						Bots.add({
-							id: name
+					if(bot = Bots.get(name)) {
+						bot.set({
+							count: obj.all,
+							minor: obj.minor
 						});
+					} else {
+						if (name.toLowerCase().endsWith('bot')) {
+							console.log("Unregistered bot, counting as author:", name);
+						}
+						author = new Author({
+							id: name,
+							count: obj.all,
+							minor: obj.minor
+						});
+						if(loc = Locations.get(name)) {
+							author.set({location: loc});
+						}
+						editors.push(author)
 					}
-					author = new Author({
-						id: name,
-						count: obj.all,
-						minor: obj.minor
-					});
-					if(loc = Locations.get(name)) {
-						author.set({location: loc});
-					}
-					editors.push(author)
 				});
 
 				App.status();
@@ -484,7 +500,6 @@ define(["jquery",
 			}
 		});
 
-		window.Bots = new Collection;
 		window.LocationCollection = Collection.extend({
 			model: Location
 		});
@@ -665,13 +680,16 @@ define(["jquery",
 					this.display("Created", text);
 					this.display('Revision count', "{0} ({1} minor, {2} anonymous)"
 							.format(m.get('count'), m.get('minor_count'), m.get('anon_count')));
-					this.display('Contributors', "{0} users and unique IPs".format(m.get('editor_count')));
+					var ips = _.size(_.compact(Authors.pluck('ip')));
+					var bots = _.size(_.compact(Bots.pluck('count')));
+					this.display('Contributors', "{0} ({1} IPs, {2} bots)".format(m.get('editor_count'), ips, bots));
 				}
 				this.display("Last edited", m.get('touched'));
 				if(_.size(Authors)) {
 					this.column(2);
 					var located = [];
 					var editors = [];
+					var ips = 0;
 					var name;
 					Authors.each(function(author) {
 						name = author.id;
@@ -856,9 +874,8 @@ define(["jquery",
 			}
 		});
 
-		// TODO exclude bots
-		// TODO compare localness of other languages
 		// TODO userpages/talk-userpages
+		// TODO compare localness of other languages
 		// TODO getting userpages annotated
 		// TODO you are where you edit
 
@@ -883,6 +900,7 @@ define(["jquery",
 				window.Authors = new Authorship();
 				window.Revisions = new RevisionCollection();
 				window.Locations = new LocationCollection;
+				window.Bots = new Authorship(_.map(bots.list, function(b) { return {id: b}; }));
 
 				var av = new Overview();
 				var pv = new PropertiesView();
@@ -906,8 +924,6 @@ define(["jquery",
 
 				Revisions.bind('loaded', Revisions.current, Revisions);
 				Revisions.bind('loaded', dv.render, dv);
-				//Revisions.bind('change:authors', dv.addData, dv);
-				//dv.bind('update', _.debounce(_.bind(Revisions.fetchAuthors, Revisions), 1500));
 
 				CurrentRevision.bind('change:id', CurrentRevision.fetchAuthors, CurrentRevision);
 				CurrentRevision.bind('change:authors', sv.render, sv);
@@ -974,9 +990,25 @@ define(["jquery",
 			}
 		});
 
+
 	return {
 		init: function() {
 			window.App = new AppView;
+
+			// Playground
+			/* 
+			var p = new Page({title: "Wikipedia:List_of_bots_by_number_of_edits"});
+			p.bind('additional', function() {
+				var $l = $(p.attributes.text).find('.wikitable').first().find('tr td:nth-child(2)');
+				var bots = [];
+				_.each($l, function(l) {
+					bots.push($(l).text());
+				});
+				console.log(bots);
+				console.log(_.include(bots, 'SmackBot'));
+			});
+			p.fetchAdditionalData();
+			*/
 		}
 	}
 });
