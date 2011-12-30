@@ -24,7 +24,7 @@ define(["jquery",
 				});
 			},
 			isCountry: function(text) {
-				return this.alt[text] || this.get(text);
+				return this.alt[text] && this.get(this.alt[text]) || this.get(text);
 			},
 			countrify: function(country) {
 				if(!country) {
@@ -57,10 +57,30 @@ define(["jquery",
 				}
 				return !d || !isNaN(obj[attr].getTime());
 			},
+			sync: function(method, me, options) {
+				var key = this.url();
+				var cached = localStorage.getItem(key);
+				if(cached) {
+					options.success.call(this, JSON.parse(cached));
+				} else {
+					return Backbone.sync.call(this, method, this, options);
+				}
+			},
 			retrieve: function() {
 				var me = this;
+				var key = this.url();
 				me.fetch({
-					success: function(res) {
+					success: function(model, res) {
+						try { 
+							var s = JSON.stringify(res);
+							if(s.length < 20000) {
+								localStorage.setItem(key, JSON.stringify(res));
+							}
+						} 
+						catch(e) {
+							console.log("Quota exceeded. Throwing all away...");
+							localStorage.clear();
+						} 
 						me.trigger(me.loaded || 'loaded');
 					}
 				});
@@ -96,7 +116,10 @@ define(["jquery",
 					add: !!me.append,
 					success: function(col, res) {
 						try { 
-							localStorage.setItem(key, JSON.stringify(res));
+							var s = JSON.stringify(res);
+							if(s.length < 20000) {
+								localStorage.setItem(key, JSON.stringify(res));
+							}
 						} 
 						catch(e) {
 							console.log("Quota exceeded. Throwing all away...");
@@ -432,6 +455,17 @@ define(["jquery",
 				});
 				return sd / allCount;
 			},
+			checkUserPages: function() {
+				var next = this.find(function(a) {
+					return !a.has('page') && !Locations.get(a.id);
+				});
+				if(next) {
+					var userPage = new UserPage({title: next.get('urlencoded')});
+					next.set({page: userPage});
+					userPage.bind('done', this.checkUserPages, this);
+					userPage.retrieve();
+				}
+			},
 			url: function() {
 				if(Article.has('title')) {
 					App.status("Querying toolserver...");
@@ -486,6 +520,7 @@ define(["jquery",
 						}
 						author = new Author({
 							id: name,
+							urlencoded: obj.urlencoded,
 							count: obj.all,
 							minor: obj.minor
 						});
@@ -585,6 +620,59 @@ define(["jquery",
 			}
 		});
 
+		window.UserPage = Model.extend({
+			url: function() {
+				return url = "http://{0}.wikipedia.org/w/api.php?action=parse&format=json&callback=?&redirects&prop=text%7Clinks&page=User:{1}".format(Article.get('lang'), encodeURI(this.get('title')));
+			},
+			parse: function(res) {
+				var attr = {};
+				if(res.parse) {
+					var countries = [], candidate;
+					// candidate countries
+					_.each(res.parse.links, function(l) {
+						if(candidate = Countries.isCountry(l['*'])) {
+							countries.push(candidate);
+						}
+					})
+
+					if(countries.length) {
+						var text = $(res.parse.text['*']).text();
+						var country, content, match, re, patterns;
+						var patterns = [
+							" come[s]? from {0}",
+							" am from {0}",
+							" live[s]? in {0}",
+							" currently living in {0}"
+						];
+
+						_.each(countries, function(c) {
+							if(!country) {
+								_.each(patterns, function(p) {
+									if(!country) {
+										re = new RegExp(p.format(c.id));
+										if(re.test(text)) {
+											country = c.id;
+											pattern = p;
+										}
+									}
+								});
+							}
+						});
+
+						// verify first <p> has a.title in country[]
+						attr.countries = countries;
+						//console.log(this.get('title'), "Countries", _.pluck(countries, 'id'));
+						if(country) {
+							attr.country = country;
+							console.log(this.get('title') + pattern.format(country));
+						}
+					}
+				}
+				this.trigger('done');
+				return attr;
+			}
+		});
+
 		window.SectionView = Backbone.View.extend({
 			initialize: function() {
 				this.id = this.id || this.title.toLowerCase();
@@ -676,7 +764,8 @@ define(["jquery",
 				this.display("Article ID", m.get('pageid'));
 				if(m.has("first_edit")) {
 					obj = m.get('first_edit');
-					text = "{0} by {1}".format($.format.date(new Date(obj.timestamp * 1000), "yyyy-MM-dd hh:mm:ss"), obj.user);
+					var user = '<a target="u" href="http://{0}.wikipedia.org/wiki/User:{1}">{1}</a>'.format(m.get('lang'), obj.user);
+					text = "{0} by {1}".format($.format.date(new Date(obj.timestamp * 1000), "yyyy-MM-dd hh:mm:ss"), user);
 					// FIXME timestamp is not UTC
 					this.display("Created", text);
 					this.display('Revision count', "{0} ({1} minor, {2} anonymous)"
@@ -922,6 +1011,7 @@ define(["jquery",
 				Authors.bind('loaded', av.render, av);
 				Authors.bind('loaded', mv.render, mv);
 				Authors.bind('loaded', Article.calcSignatureDistance, Article);
+				Authors.bind('loaded', Authors.checkUserPages, Authors);
 
 				Revisions.bind('loaded', Revisions.current, Revisions);
 				Revisions.bind('loaded', dv.render, dv);
@@ -1007,8 +1097,6 @@ define(["jquery",
 				});
 				console.log(bots);
 				console.log(_.include(bots, 'SmackBot'));
-			});
-			p.fetchAdditionalData();
 			*/
 		}
 	}
