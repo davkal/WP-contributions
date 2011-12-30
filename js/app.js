@@ -30,20 +30,21 @@ define(["jquery",
 				if(!country) {
 					return "Unknown";
 				}
-				var c;
+				country = country.trim();
 				if(!this.get(country)) {
+					var c = null;
 					this.each(function(listItem) {
-						if(country.endsWith(listItem.id)) {
+						if(country.endsWith(listItem.id) || country.startsWith(listItem.id)) {
 							c = listItem.id;
 						}
 					});
+					if(c) {
+						return c;
+					} else {
+						console.log("Could not countrify:", country);
+					}
 				}
-				if(c) {
-					return c;
-				} else {
-					console.log("Could not countrify:", country);
-					return country;
-				}
+				return country;
 			}
 		});
 		window.Countries = new CountryCollection(countries.list);
