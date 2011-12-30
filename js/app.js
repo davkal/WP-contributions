@@ -13,7 +13,8 @@ define(["jquery",
 
 		window.CountryCollection = Backbone.Collection.extend({
 			initialize: function() {
-				var alt = {
+				this.alt = {
+					// WP title -> ISO 3166-1
 					'Russia': 'Russian Federation'
 				};
 				this.each(function(c) {
@@ -267,13 +268,15 @@ define(["jquery",
 					if(me.isMain()) {
 						// dont give up on article location
 						var country = $('.flagicon a', infobox);
+						// check for flag
 						if(country = country.attr('title')) {
 							attr.country = country;
 						} else {
+							// check first paragraph for country names
 							var links = $text.find('p').first().children('a');
 							_.each(links, function(l) {
 								if(!country) {
-									var c = Countries.get(l.title);
+									var c = Countries.isCountry(l.title);
 									if(c) {
 										country = c.id;
 									}
