@@ -13,22 +13,34 @@ define(["jquery",
 
 		window.CountryCollection = Backbone.Collection.extend({
 			initialize: function() {
+				var alt = {
+					'Russia': 'Russian Federation'
+				};
 				this.each(function(c) {
 					c.set({id: c.get('name')});
 				});
+			},
+			isCountry: function(text) {
+				return this.alt[text] || this.get(text);
 			},
 			countrify: function(country) {
 				if(!country) {
 					return "Unknown";
 				}
+				var c;
 				if(!this.get(country)) {
 					this.each(function(listItem) {
 						if(country.endsWith(listItem.id)) {
-							country = listItem.id;
+							c = listItem.id;
 						}
 					});
 				}
-				return country;
+				if(c) {
+					return c;
+				} else {
+					console.log("Could not countrify:", country);
+					return country;
+				}
 			}
 		});
 		window.Countries = new CountryCollection(countries.list);
@@ -243,12 +255,8 @@ define(["jquery",
 					// INSIGHT better to parse the HTML than wikitext
 					var attr = {};
 					attr.text = "<text>{0}</text>".format(res.parse.text['*']);
-					var infobox = $(attr.text).find('.infobox').first();
-
-					var country = $('.flagicon a', infobox);
-					if(country = country.attr('title')) {
-						attr.country = country;
-					}
+					var $text = $(attr.text);
+					var infobox = $text.find('.infobox').first();
 
 					// article location
 					var location = $('.geo-nondefault .geo', infobox).first();
@@ -257,6 +265,22 @@ define(["jquery",
 					}
 
 					if(me.isMain()) {
+						// dont give up on article location
+						var country = $('.flagicon a', infobox);
+						if(country = country.attr('title')) {
+							attr.country = country;
+						} else {
+							var links = $text.find('p').first().children('a');
+							_.each(links, function(l) {
+								if(!country) {
+									var c = Countries.get(l.title);
+									if(c) {
+										country = c.id;
+									}
+								}
+							});
+						}
+
 						// event interval
 						var start = $('.dtstart', infobox);
 						if(start = start.text()) {
@@ -829,7 +853,7 @@ define(["jquery",
 			}
 		});
 
-		// TODO parse country of event
+		// TODO exclude bots
 		// TODO compare localness of other languages
 		// TODO userpages/talk-userpages
 		// TODO getting userpages annotated
