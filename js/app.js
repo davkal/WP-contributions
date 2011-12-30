@@ -11,20 +11,27 @@ define(["jquery",
 			console.log(arguments);
 		};
 
-		var countryList = _.pluck(countries.list, 'name');
-		function countrify(country) {
-			if(!country) {
-				return "Unknown";
-			}
-			if(!_.include(countryList, country)) {
-				_.each(countryList, function(listItem) {
-					if(country.endsWith(listItem)) {
-						country = listItem;
-					}
+		window.CountryCollection = Backbone.Collection.extend({
+			initialize: function() {
+				this.each(function(c) {
+					c.set({id: c.get('name')});
 				});
+			},
+			countrify: function(country) {
+				if(!country) {
+					return "Unknown";
+				}
+				if(!this.get(country)) {
+					this.each(function(listItem) {
+						if(country.endsWith(listItem.id)) {
+							country = listItem.id;
+						}
+					});
+				}
+				return country;
 			}
-			return country;
-		}
+		});
+		window.Countries = new CountryCollection(countries.list);
 
 		window.Model = Backbone.Model.extend({
 			checkDate: function(obj, attr) {
@@ -412,7 +419,7 @@ define(["jquery",
 						if(!Locations.get(user)) {
 							Locations.add({
 								id: user,
-								region: countrify(arr[1]),
+								region: Countries.countrify(arr[1]),
 								latitude: arr[2],
 								longitude: arr[3]
 							});
