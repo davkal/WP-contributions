@@ -148,6 +148,19 @@ define(["jquery",
 					App.status("No match for geotag.");
 				}
 			},
+			fromArticle: function(title, target, eventName) {
+				var article = new Page({title: title, lang: Article.get('lang')});
+				article.bind('additional', function() {
+					var loc = new Location(article.get('location').toJSON());
+					if(loc) {
+						target.set({location: loc});
+					}
+					if(eventName) {
+						target.trigger(eventName);
+					}
+				});
+				article.fetchAdditionalData();
+			},
 			deg2rad: function(deg) {
 				return parseFloat(deg) / 180 * Math.PI;
 			},
@@ -167,6 +180,9 @@ define(["jquery",
 				'full_text': false
 			},
 			loaded: 'found',
+			isMain: function() {
+				return this == Article;
+			},
 			validate: function(attrs) {
 				if(!this.checkDate(attrs, 'start') || !this.checkDate(attrs, 'end')) {
 					return 'wrong date format';
@@ -209,36 +225,61 @@ define(["jquery",
 			},
 			fetchAdditionalData: function() {
 				var me = this;
-				var url = "http://{0}.wikipedia.org/w/api.php?action=parse&format=json&callback=?&pageid={1}".format(this.get('lang'), this.get('pageid'));
-				App.status("Getting parsed wikitext...");
+				var url = "http://{0}.wikipedia.org/w/api.php?action=parse&format=json&callback=?&".format(this.get('lang'));
+				url += this.has('pageid') ? "pageid=" + this.get('pageid') : "redirects&page=" + encodeURI(this.get('title'));
+				if(!this.isMain()) {
+					url += "&prop=text";
+				}
+				App.status("Getting HTML for  {0}...".format(this.get('title') || this.get('pageid')));
 				$.getJSON(url, function(res){
 					App.status("Extracting page features...");
+					// INSIGHT better to parse the HTML than wikitext
 					var attr = {};
 					attr.text = "<text>{0}</text>".format(res.parse.text['*']);
 					var infobox = $(attr.text).find('.infobox').first();
-					var start = $('.dtstart', infobox);
-					if(start = start.text()) {
-						attr.start = start;
+
+					var country = $('.flagicon a', infobox);
+					if(country = country.attr('title')) {
+						attr.country = country;
 					}
-					var end = $('.dtend', infobox);
-					if(end = end.text()) {
-						attr.end = end;
-					}
+
+					// article location
 					var location = $('.geo-nondefault .geo', infobox).first();
 					if(location = Location.parseText(location.text())) {
 						attr.location = location;
 					}
-					attr.languages = new LanguageCollection([{
-						title: me.get('title'),
-						lang: me.get('lang')
-					}]);
-					// BEWARE: this isnt a full clique
-					_.each(res.parse.langlinks, function(ll) {
-						attr.languages.add({title: ll['*'], lang: ll.lang});
-					});
-					me.checkDates();
+
+					if(me.isMain()) {
+						// event interval
+						var start = $('.dtstart', infobox);
+						if(start = start.text()) {
+							attr.start = start;
+						}
+
+						var end = $('.dtend', infobox);
+						if(end = end.text()) {
+							attr.end = end;
+						}
+
+						// articles in other lang editions
+						attr.languages = new LanguageCollection([{
+							title: me.get('title'),
+							lang: me.get('lang')
+						}]);
+						// BEWARE: this isnt a full clique
+						_.each(res.parse.langlinks, function(ll) {
+							attr.languages.add({title: ll['*'], lang: ll.lang});
+						});
+						me.checkDates();
+					}
+					App.status();
 					me.set(attr);
-					me.trigger('additional');
+					if(country && !location && me.isMain()) {
+						// trying to get location from country in infobox
+						Location.fromArticle(country, me, 'additional');
+					} else {
+						me.trigger('additional');
+					}
 				});
 			},
 			parse: function(res) {
@@ -307,6 +348,8 @@ define(["jquery",
 			}
 		}, {
 			fromText: function(text) {
+				var altRe = /{{[^]*?({{[^{}]*?}}[^]*?)*}}/g;
+				// abusing jquery html tree selectors
 				var t = "<text>{0}</text>".format(text
 					.replace(/{{/g, "<template>")
 					.replace(/}}/g, "</template>"));
@@ -604,7 +647,7 @@ define(["jquery",
 						editors.push(name);
 					});
 					this.textarea('Contributors ({0})'.format(_.size(editors)), editors.join('\n'));
-					this.textarea('Content ({0})'.format(Article.get('length')), Article.get('text'));
+					this.textarea('Content ({0})'.format(Article.get('length')), _.escape(Article.get('wikitext')));
 					this.column(3);
 					this.textarea('Located ({0})'.format(_.size(located)), located.join('\n'));
 					var lv = this.subview(LanguageView, Article.get('languages'));
@@ -638,9 +681,9 @@ define(["jquery",
 				var loc = Article.get('location');
 				var start = Article.get('start');
 				var end = Article.get('end');
-				if(loc || start) {
+				if(start || loc && loc.has('latitude')) {
 					this.row(['span-two-thirds', 'span-one-third']);
-					if(loc) {
+					if(loc && loc.has('latitude')) {
 						this.renderMap(loc);
 						this.column(2);
 						this.display('Location', "{0}; {1}".format(loc.get('latitude').toFixed(3), loc.get('longitude').toFixed(3)));
@@ -817,6 +860,7 @@ define(["jquery",
 				Article.bind('change:pageid', Article.fetchAdditionalData, Article);
 				Article.bind('change:pageid', av.render, av);
 				Article.bind('change:location', pv.render, pv);
+				Article.bind('change:location', dv.render, dv);
 				Article.bind('change:sig_dist', mv.render, mv);
 				Article.bind('found', av.render, av);
 				Article.bind('additional', Authors.retrieve, Authors);
@@ -834,11 +878,11 @@ define(["jquery",
 				CurrentRevision.bind('change:id', CurrentRevision.fetchAuthors, CurrentRevision);
 				CurrentRevision.bind('change:authors', sv.render, sv);
 			},
-			status: function(msg) {
+			status: _.debounce(function(msg) {
 				var size = JSON.stringify(localStorage).length / 1024 / 1024;
 				this.cache.text("Cache {0} MB".format(size.toFixed(2)));
 				this.statusEl.text(msg || "Ready.");
-			},
+			}, 500),
 			clearCache: function() {
 				localStorage.clear();
 			},
