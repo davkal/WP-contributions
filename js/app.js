@@ -281,8 +281,8 @@ define(["jquery",
 					App.status("Extracting page features...");
 					// INSIGHT better to parse the HTML than wikitext
 					var attr = {};
-					attr.text = "<text>{0}</text>".format(res.parse.text['*']);
-					var $text = $(attr.text);
+					attr.text = res.parse.text['*'].replace(/<img[^>]+>/ig, "<img>");
+					var $text = $("<text>{0}</text>".format(attr.text));
 					var infobox = $text.find('.infobox').first();
 
 					// article location
@@ -636,7 +636,9 @@ define(["jquery",
 					})
 
 					if(countries.length) {
-						var text = $(res.parse.text['*']).text();
+						var text = res.parse.text['*'];
+						text = text.replace(/<img[^>]+>/ig, "<img>")
+						text = $(text).text();
 						var country, content, match, re, patterns;
 						var patterns = [
 							" come[s]? from {0}",
@@ -964,9 +966,12 @@ define(["jquery",
 			}
 		});
 
+		// TODO unlinked country in userpages? test run
+		// TODO town in userpages?
+		// TODO include poor mans checkuser
+		// TODO static lookup country -> coords
 		// TODO userpages/talk-userpages
 		// TODO compare localness of other languages
-		// TODO getting userpages annotated
 		// TODO you are where you edit
 
 		window.AppView = Backbone.View.extend({
