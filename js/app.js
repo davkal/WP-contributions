@@ -525,6 +525,10 @@ define(["jquery",
 					'Russia': 'Russian Federation',
 					'Georgia (country)': 'Georgia'
 				};
+				this.geoMapping = {
+					// geo-region -> WP title
+					'Russian Federation': 'Russia'
+				};
 			},
 			isCountry: function(text) {
 				return this.alt[text] && this.get(this.alt[text]) || this.get(text);
@@ -534,6 +538,10 @@ define(["jquery",
 					return "Unknown";
 				}
 				country = country.trim();
+				_.each(this.geoMapping, function(to, from) {
+					country = country.replace(from, to);
+				});
+
 				if(!this.get(country)) {
 					var c = null;
 					this.each(function(listItem) {
