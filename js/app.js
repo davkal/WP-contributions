@@ -12,43 +12,6 @@ define(["jquery",
 			console.log(arguments);
 		};
 
-
-		window.CountryCollection = Backbone.Collection.extend({
-			initialize: function() {
-				this.alt = {
-					// WP title -> ISO 3166-1
-					'Russia': 'Russian Federation'
-				};
-				this.each(function(c) {
-					c.set({id: c.get('name')});
-				});
-			},
-			isCountry: function(text) {
-				return this.alt[text] && this.get(this.alt[text]) || this.get(text);
-			},
-			countrify: function(country) {
-				if(!country) {
-					return "Unknown";
-				}
-				country = country.trim();
-				if(!this.get(country)) {
-					var c = null;
-					this.each(function(listItem) {
-						if(country.endsWith(listItem.id) || country.startsWith(listItem.id)) {
-							c = listItem.id;
-						}
-					});
-					if(c) {
-						return c;
-					} else {
-						console.log("Could not countrify:", country);
-					}
-				}
-				return country;
-			}
-		});
-		window.Countries = new CountryCollection(countries.list);
-
 		window.Model = Backbone.Model.extend({
 			checkDate: function(obj, attr) {
 				var d = obj[attr];
@@ -176,7 +139,7 @@ define(["jquery",
 							(parseFloat(match[4]) + parseFloat(match[5]) / 60) * ew ]
 				}
 			},
-			parseText: function(text) {
+			parseCoords: function(text) {
 				var match, loc;
 				_.any(Location.patterns, function(parser, pattern) {
 					match = text.match(new RegExp(pattern, "im"));
@@ -286,8 +249,13 @@ define(["jquery",
 					var infobox = $text.find('.infobox').first();
 
 					// article location
-					var location = $('.geo-nondefault .geo', infobox).first();
-					if(location = Location.parseText(location.text())) {
+					var location = $text.find('#coordinates .geo').first();
+					if(!location.length) {
+						// coords maybe inside infobox
+						location = $('.geo', infobox).first();
+					}
+
+					if(location = Location.parseCoords(location.text())) {
 						attr.location = location;
 					}
 
@@ -455,14 +423,24 @@ define(["jquery",
 				});
 				return sd / allCount;
 			},
+			addCountry: function(author, country) {
+				country = Countries.get(country);
+				if(country) {
+					var location = country.clone();
+					location.set({id: author.id});
+					Locations.add(location);
+					author.set({location: location});
+				}
+			},
 			checkUserPages: function() {
 				var next = this.find(function(a) {
 					return !a.has('page') && !Locations.get(a.id);
 				});
 				if(next) {
-					var userPage = new UserPage({title: next.get('urlencoded')});
+					var userPage = new UserPage({title: next.get('urlencoded'), author: next});
 					next.set({page: userPage});
-					userPage.bind('done', this.checkUserPages, this);
+					userPage.bind('loaded', this.checkUserPages, this);
+					userPage.bind('country', this.addCountry, this);
 					userPage.retrieve();
 				}
 			},
@@ -539,6 +517,41 @@ define(["jquery",
 		window.LocationCollection = Collection.extend({
 			model: Location
 		});
+
+		window.CountryCollection = LocationCollection.extend({
+			initialize: function() {
+				this.alt = {
+					// WP title -> ISO 3166-1
+					'Russia': 'Russian Federation',
+					'Georgia (country)': 'Georgia'
+				};
+			},
+			isCountry: function(text) {
+				return this.alt[text] && this.get(this.alt[text]) || this.get(text);
+			},
+			countrify: function(country) {
+				if(!country) {
+					return "Unknown";
+				}
+				country = country.trim();
+				if(!this.get(country)) {
+					var c = null;
+					this.each(function(listItem) {
+						if(country.endsWith(listItem.id) || country.startsWith(listItem.id)) {
+							c = listItem.id;
+						}
+					});
+					if(c) {
+						return c;
+					} else {
+						console.log("Could not countrify:", country);
+					}
+				}
+				return country;
+			}
+		});
+		window.Countries = new CountryCollection(countries.list);
+
 		window.RevisionCollection = Collection.extend({
 			model: Revision,
 			offset: null,
@@ -641,9 +654,10 @@ define(["jquery",
 						text = $(text).text();
 						var country, content, match, re, patterns;
 						var patterns = [
-							" come[s]? from {0}",
+							" comes? from {0}",
 							" am from {0}",
-							" live[s]? in {0}",
+							"This user is in {0}",
+							" lives? in {0}",
 							" currently living in {0}"
 						];
 
@@ -667,10 +681,10 @@ define(["jquery",
 						if(country) {
 							attr.country = country;
 							console.log(this.get('title') + pattern.format(country));
+							this.trigger('country', this.get('author'), country);
 						}
 					}
 				}
-				this.trigger('done');
 				return attr;
 			}
 		});
@@ -690,6 +704,9 @@ define(["jquery",
 			},
 			link: function(label, value, href) {
 				this.display(label, '<a href="{0}" target="_blank">{1}</a>'.format(href, value));
+			},
+			label: function(field, text) {
+				$(field).parent('.input').prev('label').text(text);
 			},
 			textarea: function(label, value, rows) {
 				rows = rows || 7;
@@ -724,10 +741,11 @@ define(["jquery",
 		});
 
 		window.FieldView = SectionView.extend({
+			changeEvent: 'change',
 			initialize: function() {
 				this.form = this.el;
 				if(this.model) {
-					this.model.bind('change', this.render, this);
+					this.model.bind(this.changeEvent, this.render, this);
 					this.render();
 				} else {
 					this.fetch();
@@ -752,6 +770,25 @@ define(["jquery",
 					});
 					this.field.val(list.join("\n"));
 					this.model.fetchNext();
+				}
+			}
+		});
+
+		window.LocatedView = FieldView.extend({
+			changeEvent: 'change:location',
+			render: function() {
+				if(this.model) {
+					var located = this.model.filter(function(author) {
+						return author.has('location');
+					});
+					c('Located:' + located.length);
+					var label = "Located ({0})".format(_.size(located));
+					if(!this.field) {
+						this.field = this.textarea(label, "");
+					} else {
+						this.label(this.field, label);
+					}
+					this.field.val(_.pluck(located, 'id').join("\n"));
 				}
 			}
 		});
@@ -785,7 +822,7 @@ define(["jquery",
 					var name;
 					Authors.each(function(author) {
 						name = author.id;
-						if(author.get('location')) {
+						if(author.has('location')) {
 							located.push(name);
 						}
 						editors.push(name);
@@ -793,8 +830,8 @@ define(["jquery",
 					this.textarea('Contributors ({0})'.format(_.size(editors)), editors.join('\n'));
 					this.textarea('Content ({0})'.format(Article.get('length')), _.escape(Article.get('wikitext')));
 					this.column(3);
-					this.textarea('Located ({0})'.format(_.size(located)), located.join('\n'));
-					var lv = this.subview(LanguageView, Article.get('languages'));
+					this.subview(LocatedView, Authors);
+					this.subview(LanguageView, Article.get('languages'));
 				}
 
 				return this;
@@ -966,11 +1003,11 @@ define(["jquery",
 			}
 		});
 
+		// TODO static lookup country -> coords
+		// TODO update located view
 		// TODO unlinked country in userpages? test run
 		// TODO town in userpages?
 		// TODO include poor mans checkuser
-		// TODO static lookup country -> coords
-		// TODO userpages/talk-userpages
 		// TODO compare localness of other languages
 		// TODO you are where you edit
 
@@ -1093,15 +1130,30 @@ define(["jquery",
 
 			// Playground
 			/* 
-			var p = new Page({title: "Wikipedia:List_of_bots_by_number_of_edits"});
+			var p = new Page({title: "ISO_3166-1"});
 			p.bind('additional', function() {
-				var $l = $(p.attributes.text).find('.wikitable').first().find('tr td:nth-child(2)');
-				var bots = [];
+				var $l = $(p.attributes.text).find('.flagicon');
+				window.list = [];
 				_.each($l, function(l) {
-					bots.push($(l).text());
+					var link = $(l).next();
+					var title = link.attr('title');
+					var cp = new Page({title: decodeURI(link.attr('href').substr(6))});
+					cp.bind('additional', function() {
+						var co;
+						if(co = cp.get('location')) {
+							co = co.toJSON();
+							co.id = title;
+							co.region = title;
+							list.push(co);
+						} else {
+							console.log("No coords", title);
+						}
+					}, cp);
+					cp.fetchAdditionalData();
 				});
-				console.log(bots);
-				console.log(_.include(bots, 'SmackBot'));
+				//console.log(list);
+			});
+			p.fetchAdditionalData();
 			*/
 		}
 	}
