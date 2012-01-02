@@ -7,7 +7,7 @@ define(["jquery",
 		"bots", 
 		'async!http://maps.google.com/maps/api/js?sensor=false',
 		'goog!visualization,1,packages:[corechart,geochart]'
-	], function($, dateFormat, _, Backbone, lz77, countries, bots) {
+	], function($, dateFormat, _, Backbone, lz77, countries, botlist) {
 
 		window.c = function() {
 			console.log(arguments);
@@ -192,7 +192,7 @@ define(["jquery",
 			},
 			calcSignatureDistance: function() {
 				if(this.has('location')) {
-					this.set({sig_dist: Authors.signatureDistance()});
+					this.set({sig_dist: this.get('authors').signatureDistance()});
 				}
 			},
 			phase: function() {
@@ -275,14 +275,15 @@ define(["jquery",
 						}
 
 						// articles in other lang editions
-						attr.languages = new LanguageCollection([{
+						var languages = [{
 							title: me.get('title'),
 							lang: me.get('lang')
-						}]);
+						}];
 						// BEWARE: this isnt a full clique
 						_.each(res.parse.langlinks, function(ll) {
-							attr.languages.add({title: ll['*'], lang: ll.lang});
+							languages.push({title: ll['*'], lang: ll.lang});
 						});
+						me.get('languages').reset(languages);
 						me.checkDates();
 					}
 					App.status();
@@ -313,6 +314,59 @@ define(["jquery",
 			}
 		});
 
+		window.MainArticle = Page.extend({
+			defaults: {
+				lang: 'en',
+				full_text: true
+			},
+			initialize: function() {
+				var authors = new Authorship;
+				var revisions = new RevisionCollection;
+				var locations = new LocationCollection;
+				var languages = new LanguageCollection;
+				var bots = new Authorship(_.map(botlist.list, function(b){return {id: b};}));
+
+				this.bind('change:input', this.retrieve, this); 
+				this.bind('change:pageid', this.fetchAdditionalData, this); 
+				this.bind('additional', authors.retrieve, authors);
+
+				authors.bind('loaded', revisions.retrieve, revisions);
+				authors.bind('loaded', this.calcSignatureDistance, this);
+				authors.bind('loaded', authors.checkUserPages, authors);
+
+				revisions.bind('loaded', revisions.current, revisions);
+
+				languages.bind('reset', languages.fetchNext, languages);
+				languages.bind('change', languages.fetchNext, languages);
+				languages.bind('done', function(){this.done('languages')}, this);
+
+				this.set({
+					authors: authors,
+					revisions: revisions,
+					locations: locations,
+					languages: languages,
+					bots: bots
+				});
+			},
+			todo: ['languages', 'userpages'],
+			done: function(todoItem) {
+				this.todo = _.without(this.todo, todoItem);
+				if(!_.size(this.todo)) {
+					this.trigger('done');
+				}
+			},
+			h1: function() {
+				var start = this.get('start');
+				if(start) {
+					var created = this.get('revisions').at(0).get('timestamp');
+					var diff = new Date(created) - new Date(start);
+					console.log(diff);
+					return diff;
+				}
+				return "Unknown (no start date).";
+			}
+		});
+
 		window.Revision = Model.extend({
 			fetchAuthors: function() {
 				var me = this;
@@ -320,13 +374,14 @@ define(["jquery",
 				App.status("Authors for text in revision {0}...".format(this.id));
 				$.get(url, function(res){
 					App.status("Parsing wikitext...");
+					var authors = Article.get('authors');
 					var pattern = /{{#t:[^{}]*}}/gm;
 					var tokens = res.responseText.match(pattern);
 					var editors = _.uniq(_.map(tokens, function(token) {
 						return token.replace("{{", "").replace("}}", "").split(",")[2];
 					}));
 					var sd;
-				   	if(sd = Authors.signatureDistance(editors)) {
+				   	if(sd = authors.signatureDistance(editors)) {
 						me.set({sig_dist: sd});
 					}
 					App.status();
@@ -413,13 +468,14 @@ define(["jquery",
 				if(country) {
 					var location = country.clone();
 					location.set({id: author.id});
-					Locations.add(location);
+					Article.get('locations').add(location);
 					author.set({location: location});
 				}
 			},
 			checkUserPages: function() {
+				var locations = Article.get('locations');
 				var next = this.find(function(a) {
-					return !a.has('page') && !Locations.get(a.id);
+					return !a.has('page') && !locations.get(a.id);
 				});
 				if(next) {
 					var userPage = new UserPage({title: next.get('urlencoded'), author: next});
@@ -452,18 +508,19 @@ define(["jquery",
 				// parsing locations
 				var user, loc, dist;
 				var articleLoc = Article.get('location');
+				var locations = Article.get('locations');
 				_.each(res.anons, function(arr, ts) {
 					if(arr && arr.length == 4) {
 						user = arr[0];
-						if(!Locations.get(user)) {
-							Locations.add({
+						if(!locations.get(user)) {
+							locations.add({
 								id: user,
 								region: Countries.countrify(arr[1]),
 								latitude: arr[2],
 								longitude: arr[3]
 							});
 						}
-						loc = Locations.get(user);
+						loc = locations.get(user);
 						if(articleLoc && !loc.has('distance')) {
 							loc.calcDistance(articleLoc);
 						}
@@ -474,8 +531,9 @@ define(["jquery",
 
 				// adding all editors
 				var editors = [], author, bot;
+				var bots = Article.get('bots');
 				_.each(res.editors, function(obj, name) {
-					if(bot = Bots.get(name)) {
+					if(bot = bots.get(name)) {
 						bot.set({
 							count: obj.all,
 							minor: obj.minor
@@ -490,7 +548,7 @@ define(["jquery",
 							count: obj.all,
 							minor: obj.minor
 						});
-						if(loc = Locations.get(name)) {
+						if(loc = locations.get(name)) {
 							author.set({location: loc});
 						}
 						editors.push(author)
@@ -605,6 +663,7 @@ define(["jquery",
 				});
 			},
 			fetchAuthors: function() {
+				var locations = Article.get('locations');
 				var rev = this.find(function(r) {
 					return !r.has('authors') 
 						&& Locations.get(r.get('user'));
@@ -636,6 +695,8 @@ define(["jquery",
 						article.set({revisions: revisions});
 					});
 					revisions.retrieve();
+				} else {
+					this.trigger('done');
 				}
 			}
 		});
@@ -778,7 +839,6 @@ define(["jquery",
 						return "{0}: {1}".format(a.get('lang'), a.get('revisions').first().get('timestamp'));
 					});
 					this.field.val(list.join("\n"));
-					this.model.fetchNext();
 				}
 			}
 		});
@@ -806,6 +866,8 @@ define(["jquery",
 			render: function() {
 				this.row(['span-one-third', 'span-one-third', 'span-one-third']);
 				var m = Article;
+				var authors = m.get('authors');
+				var bots = m.get('bots');
 				var text, obj;
 				this.link("Title", "{0} ({1})".format(m.get('title'), m.get('lang')), "http://{0}.wikipedia.org/wiki/{1}".format(m.get('lang'), m.get('title')));
 				this.display("Article ID", m.get('pageid'));
@@ -817,18 +879,18 @@ define(["jquery",
 					this.display("Created", text);
 					this.display('Revision count', "{0} ({1} minor, {2} anonymous)"
 							.format(m.get('count'), m.get('minor_count'), m.get('anon_count')));
-					var ips = _.size(_.compact(Authors.pluck('ip')));
-					var bots = _.size(_.compact(Bots.pluck('count')));
+					var ips = _.size(_.compact(authors.pluck('ip')));
+					var bots = _.size(_.compact(bots.pluck('count')));
 					this.display('Contributors', "{0} ({1} IPs, {2} bots)".format(m.get('editor_count'), ips, bots));
 				}
 				this.display("Last edited", m.get('touched'));
-				if(_.size(Authors)) {
+				if(_.size(authors)) {
 					this.column(2);
 					var located = [];
 					var editors = [];
 					var ips = 0;
 					var name;
-					Authors.each(function(author) {
+					authors.each(function(author) {
 						name = author.id;
 						if(author.has('location')) {
 							located.push(name);
@@ -838,7 +900,7 @@ define(["jquery",
 					this.textarea('Contributors ({0})'.format(_.size(editors)), editors.join('\n'));
 					this.textarea('Content ({0})'.format(Article.get('length')), _.escape(Article.get('wikitext')));
 					this.column(3);
-					this.subview(LocatedView, Authors);
+					this.subview(LocatedView, authors);
 					this.subview(LanguageView, Article.get('languages'));
 				}
 
@@ -897,16 +959,18 @@ define(["jquery",
 				geoChart.draw(table);
 			},
 			render: function() {
-				if(_.size(Locations) && _.size(Authors)) {
+				var locations = Article.get('locations');
+				var authors = Article.get('authors');
+				if(_.size(locations) && _.size(authors)) {
 					this.row(['span-two-thirds', 'span-one-third']);
-					var located = Authors.filter(function(author) {
+					var located = authors.filter(function(author) {
 						return author.has('location');
 					});
 					var geoData = _.groupBy(located, function(author) {
 						return author.get('location').get('region');
 					});
-					var geoCount = _.sortBy(_.map(geoData, function(authors, region) { 
-						return [region, _.reduce(authors, function(memo, author) { return memo + author.get('count');}, 0)] 
+					var geoCount = _.sortBy(_.map(geoData, function(group, region) { 
+						return [region, _.reduce(group, function(memo, author) { return memo + author.get('count');}, 0)] 
 					}), function(num){return num[1]});
 					geoCount.reverse();
 					this.renderMap(geoCount);
@@ -925,10 +989,11 @@ define(["jquery",
 			render: function() {
 				if(CurrentRevision.has('authors')) {
 					var m = CurrentRevision;
+					var locations = Article.get('locations');
 					this.subtitle = "revision: {0} time: {1} user: {2}".format(m.id, m.get('timestamp'), m.get('user'));
 					this.row(['span-two-thirds', 'span-one-third']);
 					var authors = CurrentRevision.get('authors');
-					locations = Locations.filter(function(loc) {
+					locations = locations.filter(function(loc) {
 						return _.include(authors, loc.id);
 					});
 					var geoData = _.groupBy(locations, function(loc) {
@@ -958,10 +1023,7 @@ define(["jquery",
 					this.trigger('update');
 				}
 			},
-			onSelect: function() {
-			},
-			renderTable: function(rows) {
-				var me = this;
+			renderTable: function(rows, onSelect) {
 				this.table = new google.visualization.DataTable();
 				this.table.addColumn('date', 'Date');
 				this.table.addColumn('number', 'Sd(km)');
@@ -970,32 +1032,31 @@ define(["jquery",
 					this.table.addRows(rows);
 				}
 				this.chart = new google.visualization.LineChart(this.div(_.uniqueId("lineChart")));
-				google.visualization.events.addListener(this.chart, 'select', function(){
-					var sel = me.chart.getSelection()[0];
-					var revid = me.table.getValue(sel.row, 2);
-					Revisions.current(revid);
-				});
+				if(onSelect) {
+					google.visualization.events.addListener(this.chart, 'select', onSelect);
+				}
 				this.chart.draw(this.table, {width: 800});
 			}
 		});
 
 		window.LocalnessView = TimeLineChartView.extend({
 			title: "Localness",
-			prepareRow: function(model) {
-			},
 			render: function() {
-				if(_.size(Revisions) && Article.has('location')) {
-					App.status("Calculating localness (ca. {0} sec.)...".format(_.size(Revisions) >> 8));
+				var revisions = Article.get('revisions');
+				if(_.size(revisions) && Article.has('location')) {
+					App.status("Calculating localness (ca. {0} sec.)...".format(_.size(revisions) >> 8));
 					this.row();
+					var me = this;
 					var rows = [];
-					var located = Revisions.filter(function(rev) {
-						var author = Authors.get(rev.get('user'));
+					var authors = Article.get('authors');
+					var located = revisions.filter(function(rev) {
+						var author = authors.get(rev.get('user'));
 						return author && author.has('location');
 					});
 					var sd, dist;
 					// incremental signature distance
 					var localness = _.memoize(function(i, list) {
-						dist = Authors.get(list[i].get('user')).get('location').get('distance');
+						dist = authors.get(list[i].get('user')).get('location').get('distance');
 						if(i == 0) {
 							return dist;
 						}
@@ -1005,15 +1066,19 @@ define(["jquery",
 						sd = localness(index, located);
 						rows.push([new Date(rev.get('timestamp')), sd, "" + rev.id]);
 					});
-					this.renderTable(rows);
+					var onSelect = function(){
+						var sel = me.chart.getSelection()[0];
+						var revid = me.table.getValue(sel.row, 2);
+						revisions.current(revid);
+					};
+					this.renderTable(rows, onSelect);
 					App.status();
 				}
 				return this;
 			}
 		});
 
-		// TODO update located view
-		// TODO unlinked country in userpages? test run
+		// TODO categories interface
 		// TODO town in userpages?
 		// TODO include poor mans checkuser
 		// TODO compare localness of other languages
@@ -1035,12 +1100,11 @@ define(["jquery",
 				this.container = $('#content .container');
 				this.nav = $('.topbar ul.nav');
 
-				window.Article = new Page({full_text: true});
+				window.Article = new MainArticle();
 				window.CurrentRevision = new Revision();
-				window.Authors = new Authorship();
-				window.Revisions = new RevisionCollection();
-				window.Locations = new LocationCollection;
-				window.Bots = new Authorship(_.map(bots.list, function(b) { return {id: b}; }));
+
+				var authors = Article.get('authors');
+				var revisions = Article.get('revisions');
 
 				var av = new Overview();
 				var pv = new PropertiesView();
@@ -1048,27 +1112,20 @@ define(["jquery",
 				var sv = new SurvivorView();
 				var dv = new LocalnessView();
 
-				Article.bind('change:input', Article.retrieve, Article);
-				Article.bind('change:pageid', Article.fetchAdditionalData, Article);
 				Article.bind('change:pageid', av.render, av);
 				Article.bind('change:location', pv.render, pv);
 				Article.bind('change:location', dv.render, dv);
 				Article.bind('change:location', Countries.distance, Countries);
 				Article.bind('change:sig_dist', mv.render, mv);
 				Article.bind('found', av.render, av);
-				Article.bind('additional', Authors.retrieve, Authors);
 
-				Authors.bind('loaded', Revisions.retrieve, Revisions);
-				Authors.bind('loaded', av.render, av);
-				Authors.bind('loaded', mv.render, mv);
-				Authors.bind('loaded', Article.calcSignatureDistance, Article);
-				Authors.bind('loaded', Authors.checkUserPages, Authors);
-				Authors.bind('userpages', mv.render, mv);
-				Authors.bind('userpages', sv.render, sv);
-				Authors.bind('userpages', dv.render, dv);
+				authors.bind('loaded', av.render, av);
+				authors.bind('loaded', mv.render, mv);
+				authors.bind('userpages', mv.render, mv);
+				authors.bind('userpages', sv.render, sv);
+				authors.bind('userpages', dv.render, dv);
 
-				Revisions.bind('loaded', Revisions.current, Revisions);
-				Revisions.bind('loaded', dv.render, dv);
+				revisions.bind('loaded', dv.render, dv);
 
 				CurrentRevision.bind('change:id', CurrentRevision.fetchAuthors, CurrentRevision);
 				CurrentRevision.bind('change:authors', sv.render, sv);
@@ -1114,10 +1171,6 @@ define(["jquery",
 
 				Article.unbind();
 				CurrentRevision.unbind();
-				Authors.unbind();
-				Bots.unbind();
-				Revisions.unbind();
-				Locations.unbind();
 
 				this.initialize();
 			},
