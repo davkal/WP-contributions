@@ -428,6 +428,8 @@ define(["jquery",
 					userPage.bind('country', this.addCountry, this);
 					App.status('Getting user page for {0}...'.format(next.id));
 					userPage.retrieve();
+				} else {
+					this.trigger('userpages');
 				}
 			},
 			url: function() {
@@ -519,6 +521,11 @@ define(["jquery",
 					'Russian Federation': 'Russia'
 				};
 			},
+			distance: function(article, loc) {
+				this.each(function(c) {
+					c.calcDistance(loc);
+				});
+			},
 			isCountry: function(text) {
 				return this.alt[text] && this.get(this.alt[text]) || this.get(text);
 			},
@@ -578,10 +585,8 @@ define(["jquery",
 				var page = _.first(_.values(pages));
 				_.each(page.revisions, function(rev) {
 					rev.id = rev.revid;
+					rev.user = _.escape(rev.user);
 					delete rev.comment;
-					if(loc = Locations.get(rev.user)) {
-						rev.location = loc;
-					}
 				});
 				if(this.continue && res['query-continue']) {
 					var next = res['query-continue'].revisions['rvstartid'];
@@ -593,6 +598,11 @@ define(["jquery",
 				}
 				App.status();
 				return page.revisions;
+			},
+			forUser: function(user) {
+				return this.filter(function(rev) {
+					return rev.get('user') == user;
+				});
 			},
 			fetchAuthors: function() {
 				var rev = this.find(function(r) {
@@ -979,12 +989,13 @@ define(["jquery",
 					this.row();
 					var rows = [];
 					var located = Revisions.filter(function(rev) {
-						return rev.has('location');
+						var author = Authors.get(rev.get('user'));
+						return author && author.has('location');
 					});
 					var sd, dist;
 					// incremental signature distance
 					var localness = _.memoize(function(i, list) {
-						dist = list[i].get('location').get('distance');
+						dist = Authors.get(list[i].get('user')).get('location').get('distance');
 						if(i == 0) {
 							return dist;
 						}
@@ -1042,6 +1053,7 @@ define(["jquery",
 				Article.bind('change:pageid', av.render, av);
 				Article.bind('change:location', pv.render, pv);
 				Article.bind('change:location', dv.render, dv);
+				Article.bind('change:location', Countries.distance, Countries);
 				Article.bind('change:sig_dist', mv.render, mv);
 				Article.bind('found', av.render, av);
 				Article.bind('additional', Authors.retrieve, Authors);
@@ -1051,6 +1063,9 @@ define(["jquery",
 				Authors.bind('loaded', mv.render, mv);
 				Authors.bind('loaded', Article.calcSignatureDistance, Article);
 				Authors.bind('loaded', Authors.checkUserPages, Authors);
+				Authors.bind('userpages', mv.render, mv);
+				Authors.bind('userpages', sv.render, sv);
+				Authors.bind('userpages', dv.render, dv);
 
 				Revisions.bind('loaded', Revisions.current, Revisions);
 				Revisions.bind('loaded', dv.render, dv);
