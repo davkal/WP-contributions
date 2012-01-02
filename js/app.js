@@ -12,6 +12,8 @@ define(["jquery",
 			console.log(arguments);
 		};
 
+		window.CACHE_LIMIT = 20000; // keep low, big pages are worth the transfer
+
 		window.Model = Backbone.Model.extend({
 			checkDate: function(obj, attr) {
 				var d = obj[attr];
@@ -36,7 +38,7 @@ define(["jquery",
 					success: function(model, res) {
 						try { 
 							var s = JSON.stringify(res);
-							if(s.length < 20000) {
+							if(s.length < CACHE_LIMIT) {
 								localStorage.setItem(key, JSON.stringify(res));
 							}
 						} 
@@ -80,7 +82,7 @@ define(["jquery",
 					success: function(col, res) {
 						try { 
 							var s = JSON.stringify(res);
-							if(s.length < 20000) {
+							if(s.length < CACHE_LIMIT) {
 								localStorage.setItem(key, JSON.stringify(res));
 							}
 						} 
@@ -441,6 +443,7 @@ define(["jquery",
 					next.set({page: userPage});
 					userPage.bind('loaded', this.checkUserPages, this);
 					userPage.bind('country', this.addCountry, this);
+					App.status('Getting user page for {0}...'.format(next.id));
 					userPage.retrieve();
 				}
 			},
@@ -527,6 +530,9 @@ define(["jquery",
 				};
 				this.geoMapping = {
 					// geo-region -> WP title
+					'Bahamas': 'The Bahamas',
+					'Korea, Republic of': 'South Korea',
+					'Ireland': 'Republic of Ireland',
 					'Russian Federation': 'Russia'
 				};
 			},
@@ -658,23 +664,25 @@ define(["jquery",
 
 					if(countries.length) {
 						var text = res.parse.text['*'];
-						text = text.replace(/<img[^>]+>/ig, "<img>")
-						text = $(text).text();
-						var country, content, match, re, patterns;
+						var $text = $(text.replace(/<img[^>]+>/ig, "<img>"));
+						var country, re, pattern, context, selector;
 						var patterns = [
-							" comes? from {0}",
-							" am from {0}",
-							"This user is in {0}",
-							" lives? in {0}",
-							" currently living in {0}"
+							" comes? from",
+							" am from",
+							"This user is in",
+							" lives? in",
+							" currently living in"
 						];
+						// BEWARE User:Lihaas has multiple hits
 
 						_.each(countries, function(c) {
 							if(!country) {
+								selector = 'a[title="{0}"]'.format(c.id);
+								context = $text.find(selector).closest('div,p,td').text();
 								_.each(patterns, function(p) {
 									if(!country) {
-										re = new RegExp(p.format(c.id));
-										if(re.test(text)) {
+										re = new RegExp(p);
+										if(re.test(context)) {
 											country = c.id;
 											pattern = p;
 										}
@@ -683,16 +691,16 @@ define(["jquery",
 							}
 						});
 
-						// verify first <p> has a.title in country[]
 						attr.countries = countries;
-						//console.log(this.get('title'), "Countries", _.pluck(countries, 'id'));
 						if(country) {
 							attr.country = country;
-							console.log(this.get('title') + pattern.format(country));
+							attr.context = context;
+							console.log(this.get('title'), pattern, country);
 							this.trigger('country', this.get('author'), country);
 						}
 					}
 				}
+				App.status();
 				return attr;
 			}
 		});
@@ -789,7 +797,6 @@ define(["jquery",
 					var located = this.model.filter(function(author) {
 						return author.has('location');
 					});
-					c('Located:' + located.length);
 					var label = "Located ({0})".format(_.size(located));
 					if(!this.field) {
 						this.field = this.textarea(label, "");
@@ -1011,7 +1018,6 @@ define(["jquery",
 			}
 		});
 
-		// TODO static lookup country -> coords
 		// TODO update located view
 		// TODO unlinked country in userpages? test run
 		// TODO town in userpages?
@@ -1069,11 +1075,14 @@ define(["jquery",
 				CurrentRevision.bind('change:id', CurrentRevision.fetchAuthors, CurrentRevision);
 				CurrentRevision.bind('change:authors', sv.render, sv);
 			},
-			status: _.debounce(function(msg) {
-				var size = JSON.stringify(localStorage).length / 1024 / 1024;
-				this.cache.text("Cache {0} MB".format(size.toFixed(2)));
-				this.statusEl.text(msg || "Ready.");
-			}, 500),
+			status: _.throttle(function(msg) {
+				if(!msg) {
+					msg = "Ready.";
+					var size = JSON.stringify(localStorage).length / 1024 / 1024;
+					this.cache.text("Cache {0} MB".format(size.toFixed(2)));
+				}
+				this.statusEl.text(msg);
+			}, 1000),
 			clearCache: function() {
 				localStorage.clear();
 			},
