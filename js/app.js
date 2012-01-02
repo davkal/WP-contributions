@@ -2,17 +2,18 @@ define(["jquery",
 		"jquery.dateFormat", 
 		"underscore", 
 		"backbone", 
+		"lz77", 
 		"countries", 
 		"bots", 
 		'async!http://maps.google.com/maps/api/js?sensor=false',
 		'goog!visualization,1,packages:[corechart,geochart]'
-	], function($, dateFormat, _, Backbone, countries, bots) {
+	], function($, dateFormat, _, Backbone, lz77, countries, bots) {
 
 		window.c = function() {
 			console.log(arguments);
 		};
 
-		window.CACHE_LIMIT = 20000; // keep low, big pages are worth the transfer
+		window.CACHE_LIMIT = 50000; // keep low, big pages are worth the transfer
 
 		window.Model = Backbone.Model.extend({
 			checkDate: function(obj, attr) {
@@ -24,9 +25,9 @@ define(["jquery",
 			},
 			sync: function(method, me, options) {
 				var key = this.url();
-				var cached = localStorage.getItem(key);
+				var cached = App.getItem(key);
 				if(cached) {
-					options.success.call(this, JSON.parse(cached));
+					options.success.call(this, cached);
 				} else {
 					return Backbone.sync.call(this, method, this, options);
 				}
@@ -36,16 +37,7 @@ define(["jquery",
 				var key = this.url();
 				me.fetch({
 					success: function(model, res) {
-						try { 
-							var s = JSON.stringify(res);
-							if(s.length < CACHE_LIMIT) {
-								localStorage.setItem(key, JSON.stringify(res));
-							}
-						} 
-						catch(e) {
-							console.log("Quota exceeded. Throwing all away...");
-							localStorage.clear();
-						} 
+						App.setItem(key, res);
 						me.trigger(me.loaded || 'loaded');
 					}
 				});
@@ -67,9 +59,9 @@ define(["jquery",
 			},
 			sync: function(method, me, options) {
 				var key = this.url();
-				var cached = localStorage.getItem(key);
+				var cached = App.getItem(key);
 				if(cached) {
-					options.success.call(this, JSON.parse(cached));
+					options.success.call(this, cached);
 				} else {
 					return Backbone.sync.call(this, method, this, options);
 				}
@@ -80,16 +72,7 @@ define(["jquery",
 				me.fetch({
 					add: !!me.append,
 					success: function(col, res) {
-						try { 
-							var s = JSON.stringify(res);
-							if(s.length < CACHE_LIMIT) {
-								localStorage.setItem(key, JSON.stringify(res));
-							}
-						} 
-						catch(e) {
-							console.log("Quota exceeded. Throwing all away...");
-							localStorage.clear();
-						}
+						App.setItem(key, res);
 						if(!me.offset) {
 							me.trigger(me.loaded || 'loaded');
 						}
@@ -1085,6 +1068,26 @@ define(["jquery",
 			}, 1000),
 			clearCache: function() {
 				localStorage.clear();
+			},
+			setItem: function(key, value) {
+				value = JSON.stringify(value);
+				if(value.length < CACHE_LIMIT) {
+					var s = lz77.compress(value);
+					try { 
+						localStorage.setItem(key, s);
+					}
+					catch(e) {
+						console.log("Quota exceeded. Clearing cache...");
+						localStorage.clear();
+					} 
+				} 
+			},
+			getItem: function(key) {
+				var item = localStorage.getItem(key);
+				if(item) {
+					item = JSON.parse(lz77.decompress(item));
+				}
+				return item;
 			},
 			clear: function() {
 				this.status();
