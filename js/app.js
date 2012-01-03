@@ -338,7 +338,9 @@ define(["jquery",
 
 				languages.bind('reset', languages.fetchNext, languages);
 				languages.bind('change', languages.fetchNext, languages);
+
 				languages.bind('done', function(){this.done('languages')}, this);
+				authors.bind('done', function(){this.done('authors')}, this);
 
 				this.set({
 					authors: authors,
@@ -348,7 +350,7 @@ define(["jquery",
 					bots: bots
 				});
 			},
-			todo: ['languages', 'userpages'],
+			todo: ['languages', 'authors'],
 			done: function(todoItem) {
 				this.todo = _.without(this.todo, todoItem);
 				if(!_.size(this.todo)) {
@@ -360,8 +362,8 @@ define(["jquery",
 				if(start) {
 					var created = this.get('revisions').at(0).get('timestamp');
 					var diff = new Date(created) - new Date(start);
-					console.log(diff);
-					return diff;
+					var days = diff / 1000 / 60 / 60 / 24;
+					return "{0} ({1})".format(days < 3 ? 'True' : 'False', days.toFixed(1));
 				}
 				return "Unknown (no start date).";
 			}
@@ -485,7 +487,7 @@ define(["jquery",
 					App.status('Getting user page for {0}...'.format(next.id));
 					userPage.retrieve();
 				} else {
-					this.trigger('userpages');
+					this.trigger('done');
 				}
 			},
 			url: function() {
@@ -908,9 +910,19 @@ define(["jquery",
 			}
 		});
 
+		window.HypothesesView = SectionView.extend({
+			title: "Hypotheses",
+			render: function() {
+				this.row(['span-one-third', 'span-one-third', 'span-one-third']);
+				var m = Article;
+				this.display('Article was created in the first 3 days', m.h1());
+				return this;
+			}
+		});
+
 		window.PropertiesView = SectionView.extend({
 			id: "properties",
-			title: "Article properties",
+			title: "Article",
 			renderMap: function(loc) {
 				var myLatlng = new google.maps.LatLng(loc.get('latitude'), loc.get('longitude'));
 				var myOptions = {
@@ -1078,6 +1090,8 @@ define(["jquery",
 			}
 		});
 
+		// TODO implement hypotheses 
+		// TODO make Locations global for re-use
 		// TODO categories interface
 		// TODO town in userpages?
 		// TODO include poor mans checkuser
@@ -1111,6 +1125,7 @@ define(["jquery",
 				var mv = new MapView();
 				var sv = new SurvivorView();
 				var dv = new LocalnessView();
+				var hv = new HypothesesView();
 
 				Article.bind('change:pageid', av.render, av);
 				Article.bind('change:location', pv.render, pv);
@@ -1118,6 +1133,7 @@ define(["jquery",
 				Article.bind('change:location', Countries.distance, Countries);
 				Article.bind('change:sig_dist', mv.render, mv);
 				Article.bind('found', av.render, av);
+				Article.bind('done', hv.render, hv);
 
 				authors.bind('loaded', av.render, av);
 				authors.bind('loaded', mv.render, mv);
