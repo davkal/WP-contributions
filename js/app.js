@@ -213,6 +213,12 @@ define(["jquery",
 						if(period && period.length == 2) {
 							this.set({start: period[0]});
 							this.set({end: period[1]});
+						} else {
+							// single day event
+							var start = infobox.firstDate();
+							if(start) {
+								this.set({start: start, end: start});
+							}
 						}
 					}
 				}
@@ -408,6 +414,14 @@ define(["jquery",
 				var m;
 			   	if(m = this.match(/\|\s*date\s*=\s*([^-–|]*)\s*[-–]\s*([^-–|]*)\s*\|/)) {
 					return m
+				}
+			},
+			firstDate: function() {
+				var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+				var re = "[ _]date\\s?=\\s?(\\d{1,2}) ({0}) (\\d{2,4})".format(MONTHS.join('|'));
+				console.log(re);
+			   	if(m = this.match(new RegExp(re))) {
+					return m.join(' ');
 				}
 			},
 			match: function(reg) {
@@ -952,8 +966,8 @@ define(["jquery",
 						this.display('Location', "{0}; {1}".format(loc.get('latitude').toFixed(3), loc.get('longitude').toFixed(3)));
 					}
 					if(start) {
-						this.display('Start', $.format.date(start, "yyyy-MM-dd"));
-						this.display('End/Status', end ? $.format.date(end, "yyyy-MM-dd") : 'ongoing');
+						this.display('Start', $.format.date(new Date(start), "yyyy-MM-dd"));
+						this.display('End/Status', end ? $.format.date(new Date(end), "yyyy-MM-dd") : 'ongoing');
 					}
 				}
 				return this;
