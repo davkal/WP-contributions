@@ -26,6 +26,10 @@ require(["jquery",
 	], function($, _, Backbone, ba, bs, jx, app) {
 
 		_.mixin({
+			random: function(list) {
+				var index = Math.floor(Math.random() * list.length);
+				return list[index];
+			},
 			extract: function(obj, list) {
 				var ret = {};
 				_.each(obj, function(val, key) {
@@ -39,4 +43,14 @@ require(["jquery",
 
 		app.init();
 		$('.topbar').scrollSpy();
+
+		$('.add-on :checkbox').change(function () {
+			if ($(this).attr('checked')) {
+				$(this).parents('.add-on').addClass('active')
+					.next().attr('placeholder', "Template");
+			} else {
+				$(this).parents('.add-on').removeClass('active')
+					.next().attr('placeholder', "Article");
+			}
+		})
 });

@@ -64,22 +64,18 @@
 	    <div class="container">
 			<form action="" class="clearfix">
 	            <div class="input">
-    	        	<input id="input" placeholder="Article" class="" size="30" type="text" />
-			  <!--
-              <select name="normalSelect" id="normalSelect">
-                <option>1</option>
-                <option>2</option>
-                <option>3</option>
-                <option>4</option>
-                <option>5</option>
-              </select>
-			  -->
-        	    	<button class="btn primary" id="analyze">Analyze!</button>
-        	    	<button class="btn example" title="2011 Egyptian revolution">A</button>
-        	    	<button class="btn example" title="2011 Bahraini uprising">B</button>
-        	    	<button class="btn example" title="Berlin">C</button>
-        	    	<button class="btn example" title="Russian legislative election, 2011">D</button>
-					<span id="status" class="help-inline">Ready.</span>
+					<div class="input-prepend">
+						<label class="add-on">
+							<input type="checkbox" id="group" title="Check to analyze a group of articles using a particular template.">
+						</label>
+						<input id="input" placeholder="Article" class="" size="30" type="text" />
+						<button class="btn primary" id="analyze">Analyze!</button>
+						<button class="btn example" title="2011 Egyptian revolution">A</button>
+						<button class="btn example" title="2011 Bahraini uprising">B</button>
+						<button class="btn example" title="Russian legislative election, 2011">C</button>
+						<button class="btn example" title="Template:Infobox_civil_conflict">D</button>
+						<span id="status" class="help-inline">Ready.</span>
+					</div>
             	</div>
         	</form>
       	</div>

@@ -184,10 +184,10 @@ define(["jquery",
 			},
 			url: function() {
 				App.status("Querying en.wikipedia.org...");
-				var url = "http://{0}.wikipedia.org/w/api.php?action=query&prop=info&format=json&redirects&callback=?&titles={1}".format(this.get('lang'), encodeURI(this.get('input')));
-				if(this.get('full_text')) {
-					url += "&export";
-				}
+				var input = this.get('input');
+				var identifier = isNaN(input) ? "titles={0}".format(encodeURI(input)) : "pageids={0}".format(input);
+				var full = this.get('full_text') ? "&export" : "";
+				var url = "http://{0}.wikipedia.org/w/api.php?action=query&prop=info&format=json&redirects&callback=?&{1}{2}".format(this.get('lang'), identifier, full);
 				return url;
 			},
 			calcSignatureDistance: function() {
@@ -330,6 +330,7 @@ define(["jquery",
 				var revisions = new RevisionCollection;
 				var locations = new LocationCollection;
 				var languages = new LanguageCollection;
+				var current = new Revision;
 				var bots = new Authorship(_.map(botlist.list, function(b){return {id: b};}));
 
 				this.bind('change:input', this.retrieve, this); 
@@ -342,6 +343,8 @@ define(["jquery",
 
 				revisions.bind('loaded', revisions.current, revisions);
 
+				current.bind('change:id', current.fetchAuthors, current);
+
 				languages.bind('reset', languages.fetchNext, languages);
 				languages.bind('change', languages.fetchNext, languages);
 
@@ -353,6 +356,7 @@ define(["jquery",
 					revisions: revisions,
 					locations: locations,
 					languages: languages,
+					current: current,
 					bots: bots
 				});
 			},
@@ -364,6 +368,7 @@ define(["jquery",
 				}
 			},
 			h1: function() {
+				// TODO disregard when end? was before article was created
 				var start = this.get('start');
 				if(start) {
 					var created = this.get('revisions').at(0).get('timestamp');
@@ -372,6 +377,46 @@ define(["jquery",
 					return "{0} ({1})".format(days < 3 ? 'True' : 'False', days.toFixed(1));
 				}
 				return "Unknown (no start date).";
+			}
+		});
+
+		// TODO try templates
+		// Infobox_military_conflict
+		// Infobox_civil_conflict
+		// Infobox_historical_event
+
+		window.TemplateEmbedders = Collection.extend({
+			model: Page,
+			offset: null,
+			fetchPages: function(title) {
+				this.title = title;
+				this.retrieve();
+				this.trigger('ha');
+			},
+			url: function() {
+				var offset = this.offset || "";
+				var url = "http://{0}.wikipedia.org/w/api.php?action=query&list=embeddedin&format=json&eititle=Template%3A{1}&einamespace=0&eilimit=500&redirects&callback=?{2}".format('en', this.title, offset);
+				return url;
+			},
+			parse: function(res) {
+				var pages = res.query.embeddedin;
+				if(pages["-1"]) {
+					App.error("Invalid template.");
+					return;
+				}
+				_.each(pages, function(p) {
+					p.id = p.pageid;;
+				});
+				if(this.continue && res['query-continue']) {
+					var next = res['query-continue'].embeddedin['eicontinue'];
+					this.offset = "&eicontinue={0}".format(next);
+					this.page++;
+					_.defer(_.bind(this.retrieve, this));
+				} else {
+					this.offset = null;
+				}
+				App.status();
+				return pages;
 			}
 		});
 
@@ -690,8 +735,9 @@ define(["jquery",
 			},
 			current: function(id) {
 				var rev = id && this.get(parseInt(id)) || this.last();
-				CurrentRevision.set(rev.toJSON());
-				return CurrentRevision;
+				var current = Article.get('current');
+				current.set(rev.toJSON());
+				return current;
 			}
 		});
 
@@ -1013,12 +1059,12 @@ define(["jquery",
 		window.SurvivorView = MapView.extend({
 			title: "Survivors",
 			render: function() {
-				if(CurrentRevision.has('authors')) {
-					var m = CurrentRevision;
+				var m = Article.get('current');
+				if(m && m.has('authors')) {
 					var locations = Article.get('locations');
 					this.subtitle = "revision: {0} time: {1} user: {2}".format(m.id, m.get('timestamp'), m.get('user'));
 					this.row(['span-two-thirds', 'span-one-third']);
-					var authors = CurrentRevision.get('authors');
+					var authors = m.get('authors');
 					locations = locations.filter(function(loc) {
 						return _.include(authors, loc.id);
 					});
@@ -1032,8 +1078,8 @@ define(["jquery",
 					this.renderMap(geoCount);
 					this.column(2);
 					this.textarea('Countries ({0})'.format(_.size(geoCount)), geoCount.join('\n'));
-					if(CurrentRevision.has('sig_dist')) {
-						this.display("Signature distance", "{0} km".format(CurrentRevision.get('sig_dist').toFixed(3)));
+					if(m.has('sig_dist')) {
+						this.display("Signature distance", "{0} km".format(m.get('sig_dist').toFixed(3)));
 					}
 				}
 				return this;
@@ -1104,9 +1150,11 @@ define(["jquery",
 			}
 		});
 
-		// TODO implement hypotheses 
-		// TODO make Locations global for re-use
+		// TODO implement hypotheses
 		// TODO categories interface
+
+		// Nice to have
+		// TODO make Locations global for re-use
 		// TODO town in userpages?
 		// TODO include poor mans checkuser
 		// TODO compare localness of other languages
@@ -1123,16 +1171,29 @@ define(["jquery",
 			},
 			initialize: function() {
 				this.input = this.$("#input");
+				this.$group = this.$("#group");
 				this.statusEl = $('#status');
 				this.cache = $('#cache');
 				this.container = $('#content .container');
 				this.nav = $('.topbar ul.nav');
+			},
+			analyzeGroup: function(input) {
+				window.Group = new TemplateEmbedders;
+				Group.bind('loaded', function() {
+					App.analyzeArticle(_.random(this.models).id);
+				}, Group);
+				Group.fetchPages(input);
+			},
+			analyzeArticle: function(input) {
+				if(window.Article) {
+					this.clear();
+				}
 
-				window.Article = new MainArticle();
-				window.CurrentRevision = new Revision();
+				window.Article = new MainArticle;
 
 				var authors = Article.get('authors');
 				var revisions = Article.get('revisions');
+				var current = Article.get('current');
 
 				var av = new Overview();
 				var pv = new PropertiesView();
@@ -1157,8 +1218,10 @@ define(["jquery",
 
 				revisions.bind('loaded', dv.render, dv);
 
-				CurrentRevision.bind('change:id', CurrentRevision.fetchAuthors, CurrentRevision);
-				CurrentRevision.bind('change:authors', sv.render, sv);
+				current.bind('change:authors', sv.render, sv);
+
+				// kick things off
+				Article.set({input: input});
 			},
 			status: _.throttle(function(msg) {
 				if(!msg) {
@@ -1193,16 +1256,13 @@ define(["jquery",
 			},
 			clear: function() {
 				this.status();
-				this.$('section div').remove();
+				this.$('section > div').remove();
 				this.input
 					.parents('.clearfix')
 					.removeClass('error');
 				$('a[href!="#"]', this.nav).remove();
 
 				Article.unbind();
-				CurrentRevision.unbind();
-
-				this.initialize();
 			},
 			link: function(sec) {
 				if(!$('a[href="#{0}"]'.format(sec.id), this.nav).length) {
@@ -1217,13 +1277,21 @@ define(["jquery",
 				App.status(text);
 			}, 
 			analyze: function(input) {
-				if(Article.has('input')) {
-					this.clear();
+				if(this.$group.prop('checked')) {
+					this.analyzeGroup(input);
+				} else {
+					this.analyzeArticle(input);
 				}
-				Article.set({input: input});
 			},
 			analyzeExample: function(e) {
-				this.input.val($(e.target).attr("title"));
+				var input = $(e.target).attr("title");
+				var isGroup = false;
+				if(input.startsWith('Template:')) {
+					input = input.substr(9);
+					isGroup = true;
+				}
+				this.$group.prop('checked', isGroup).change();
+				this.input.val(input);
 				return this.analyzeOnClick();
 			},
 			analyzeOnClick: function(e) {
