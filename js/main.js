@@ -27,8 +27,10 @@ require(["jquery",
 
 		_.mixin({
 			random: function(list) {
-				var index = Math.floor(Math.random() * list.length);
-				return list[index];
+				if(list.length) {
+					var index = Math.floor(Math.random() * list.length);
+					return list[index];
+				}
 			},
 			extract: function(obj, list) {
 				var ret = {};

@@ -15,10 +15,206 @@ define(["jquery",
 
 		window.CACHE_LIMIT = 50000; // keep low, big pages are worth the transfer
 
+		window.DateParser = function() {
+			var monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+			var monthShortnames = _.map(monthNames, function(m){return m.substring(0,3)});
+			var months = _.union(monthNames, monthShortnames);
+			var ords = ['th', 'st', 'nd', 'rd'];
+
+			var tokens = {
+				M: "({0})".format(months.join('|')), // months
+				D: "(\\d{1,2})" + "({0})?".format(ords.join('|')), // day
+				Y: "(\\d{4})", // year
+				T: "(-|–|\\sto\\s|\\sand\\s)", // interval delimiter
+				O: "('*ongoing'*?|'*present'*)", // ongoing event
+				F: "From", // ongoing event
+				S: "[,\\s]*", // whitespace
+				P: "\\|", // pipe
+				A: "([^-–]*)" // other text
+			};
+
+			var ws = tokens.S;
+
+			var expand = function(pattern) {
+				_.each(tokens, function(token, symbol) {
+					pattern = pattern.replace(new RegExp("%" + symbol, 'g'), ws + token + ws);
+				});
+				return pattern;
+			}
+
+			var getMonth = function(month) {
+				var index = _.indexOf(monthNames, month);
+				if(index < 0) {
+					index = _.indexOf(monthShortnames, month);
+				}
+				return index;
+			};
+
+			var patterns = {};
+
+			// 22 February 2011 – 9 June 2011
+			patterns[expand("%D%M%Y%T%D%M%Y")] = function(m) {
+				var year = m[3], month = getMonth(m[2]), date = m[1], year2 = m[7], month2 = getMonth(m[6]), date2 = m[5];
+				return [new Date(year, month, date), new Date(year2, month2, date2)];
+			};
+
+			// February 22 2011 – June 9 2011
+			patterns[expand("%M%D%Y%T%M%D%Y")] = function(m) {
+				var year = m[3], month = getMonth(m[1]), date = m[2], year2 = m[7], month2 = getMonth(m[5]), date2 = m[6];
+				return [new Date(year, month, date), new Date(year2, month2, date2)];
+			};
+
+			// February 21 – April 30, 2011
+			patterns[expand("%M%D%T%M%D%Y")] = function(m) {
+				var year = m[6], month = getMonth(m[1]), date = m[2], month2 = getMonth(m[4]), date2 = m[5];
+				return [new Date(year, month, date), new Date(year, month2, date2)];
+			};
+
+			// 12 February – 30 April 2011
+			patterns[expand("%D%M%T%D%M%Y")] = function(m) {
+				var year = m[6], month = getMonth(m[2]), date = m[1], month2 = getMonth(m[5]), date2 = m[4];
+				return [new Date(year, month, date), new Date(year, month2, date2)];
+			};
+
+			// 15–28 May 1974
+			patterns[expand("%D%T%D%M%Y")] = function(m) {
+				var year = m[5], month = getMonth(m[4]), date1 = m[1], date2 = m[3];
+				return [new Date(year, month, date1), new Date(year, month, date2)];
+			};
+
+			// December 14-19, 1970 
+			patterns[expand("%M%D%T%D%Y")] = function(m) {
+				var year = m[5], month = getMonth(m[1]), date1 = m[2], date2 = m[4];
+				return [new Date(year, month, date1), new Date(year, month, date2)];
+			};
+			//
+			// 21 to 31 August 1992 
+			patterns[expand("%D%T%D%M%Y")] = function(m) {
+				var year = m[5], month = getMonth(m[4]), date1 = m[1], date2 = m[3];
+				return [new Date(year, month, date1), new Date(year, month, date2)];
+			};
+
+			// May 1968 - June 1968 
+			patterns[expand("%M%Y%T%M%Y")] = function(m) {
+				var year = m[2], month = getMonth(m[1]), year2 = m[5], month2 = getMonth(m[4]);
+				return [new Date(year, month, 1), new Date(year2, month2, 30)];
+			};
+
+			// May - June 1968 
+			patterns[expand("%M%T%M%Y")] = function(m) {
+				var year = m[4], month = getMonth(m[1]), month2 = getMonth(m[3]);
+				return [new Date(year, month, 1), new Date(year, month2, 30)];
+			};
+
+			// 1968 - 1969
+			patterns[expand("%Y%T%Y")] = function(m) {
+				var year = m[1], year2 = m[3];
+				return [new Date(year, 0, 1), new Date(year2, 11, 31)];
+			};
+
+			// 2001|10|12 - present
+			patterns[expand("%Y%P%D%P%D%T%O")] = function(m) {
+				var year = m[1], month = parseInt(m[2]) - 1, date = m[3];
+				return [new Date(year, month, date), new Date()];
+			};
+
+			// May 12 2001 - present
+			patterns[expand("%M%D%Y%T%O")] = function(m) {
+				var year = m[3], month = getMonth(m[1]), date = m[2];
+				return [new Date(year, month, date), new Date()];
+			};
+
+			// 12 May 2001 - present
+			patterns[expand("%D%M%Y%T%O")] = function(m) {
+				var year = m[3], month = getMonth(m[2]), date = m[1];
+				return [new Date(year, month, date), new Date()];
+			};
+
+			// May 2001 - present
+			patterns[expand("%M%Y%T%O")] = function(m) {
+				var year = m[2], month = getMonth(m[1]);
+				return [new Date(year, month, 1), new Date()];
+			};
+
+			// 2011 - present
+			patterns[expand("%Y%T%O")] = function(m) {
+				var year = m[1];
+				return [new Date(year, 0, 1), new Date()];
+			};
+
+			// From 15 October 2011 
+			patterns[expand("%F%D%M%Y")] = function(m) {
+				var year = m[3], month = getMonth(m[2]), date1 = m[1];
+				return [new Date(year, month, date1), new Date()];
+			};
+
+			// 15 October 2011
+			patterns[expand("%D%M%Y")] = function(m) {
+				var year = m[3], month = getMonth(m[2]), date1 = m[1];
+				return [new Date(year, month, date1), new Date(year, month, parseInt(date1) + 1)];
+			};
+
+			// October 15 2011
+			patterns[expand("%M%D%Y")] = function(m) {
+				var year = m[3], month = getMonth(m[1]), date1 = m[2];
+				return [new Date(year, month, date1), new Date(year, month, parseInt(date1) + 1)];
+			};
+
+			// October 2011 
+			patterns[expand("%M%Y")] = function(m) {
+				var year = m[2], month = getMonth(m[1]);
+				return [new Date(year, month, 1), new Date(year, month, 30)];
+			};
+
+			// 2011 
+			patterns[expand("%Y")] = function(m) {
+				var year = m[1];
+				return [new Date(year, 0, 1), new Date(year, 11, 31)];
+			};
+
+			function parse(text) {
+				var match, re, dates;
+				_.each(patterns, function(converter, pattern) {
+					if(!dates) {
+						re = new RegExp(pattern, "i");
+						if(match = text.match(re)) {
+							//console.log(re, match);
+							match = _.compact(_.difference(match, ords));
+							dates = converter(match);
+						}
+					}
+				});
+				return dates;
+			}
+
+			function test(text, date1, date2) {
+				var parsed = parse(text);
+				var dates = Array.prototype.slice.call(arguments, 1);
+				console.assert(parsed.length == dates.length);
+				_.each(_.zip(parsed, dates), function(item) {
+					console.assert(item[0].getTime() == item[1].getTime(), text);
+				});
+			}
+
+			return {
+				test: test,
+				parse: parse
+			}
+		}();
+
+		DateParser.test("22 February 2011 – 9 June 2011", new Date(2011, 1, 22), new Date(2011, 5, 9));
+		DateParser.test("December 14-19, 1970", new Date(1970, 11, 14), new Date(1970, 11, 19));
+		DateParser.test("21 to 31 August 1992", new Date(1992, 7, 21), new Date(1992, 7, 31));
+		DateParser.test("12 and 17 May 1992", new Date(1992, 4, 12), new Date(1992, 4, 17));
+		DateParser.test("15 October 2011", new Date(2011, 9, 15), new Date(2011, 9, 16));
+		DateParser.test("May 1968 - June 1968", new Date(1968, 4, 1), new Date(1968, 5, 30));
+		DateParser.test("May 1968", new Date(1968, 4, 1), new Date(1968, 4, 30));
+		DateParser.test("1968", new Date(1968, 0, 1), new Date(1968, 11, 31));
+
 		window.Model = Backbone.Model.extend({
 			checkDate: function(obj, attr) {
 				var d = obj[attr];
-				if(d) {
+				if(d && !_.isDate(d)) {
 					obj[attr] = new Date(d);
 				}
 				return !d || !isNaN(obj[attr].getTime());
@@ -82,6 +278,13 @@ define(["jquery",
 		});
 
 		window.Location = Model.extend({
+			toString: function() {
+				var str = "{0}; {1}".format(this.get('latitude'), this.get('longitude'));
+				if(this.has('region')) {
+					str += " ({0})".format(this.get('region'));
+				}
+				return str;
+			},
 			calcDistance: function(loc) {
 				this.set({distance: Location.geodesicDistance(this, loc)});
 			}
@@ -142,15 +345,19 @@ define(["jquery",
 					App.status("No match for geotag.");
 				}
 			},
-			fromArticle: function(title, target, eventName) {
+			fromArticle: function(title, target, signal) {
 				var article = new Page({title: title, lang: Article.get('lang')});
 				article.bind('additional', function() {
-					var loc = new Location(article.get('location').toJSON());
+					var loc = article.get('location');
 					if(loc) {
+						loc = loc.clone();
+						if(Countries.isCountry(title)) {
+							loc.set({region: title});
+						}
 						target.set({location: loc});
 					}
-					if(eventName) {
-						target.trigger(eventName);
+					if(signal) {
+						target.trigger(signal);
 					}
 				});
 				article.fetchAdditionalData();
@@ -171,16 +378,12 @@ define(["jquery",
 		window.Page = Model.extend({
 			defaults: {
 				'lang': 'en',
+				'ongoing': false,
 				'full_text': false
 			},
 			loaded: 'found',
 			isMain: function() {
 				return this == window.Article;
-			},
-			validate: function(attrs) {
-				if(!this.checkDate(attrs, 'start') || !this.checkDate(attrs, 'end')) {
-					return 'wrong date format';
-				}
 			},
 			url: function() {
 				App.status("Querying en.wikipedia.org...");
@@ -204,21 +407,39 @@ define(["jquery",
 				} 
 				return 0; // w/o interval
 			},
+			toString: function() {
+				var str = [this.get('title')];
+				var start = this.get('start');
+				str.push(start ? $.format.date(start, "yyyy-MM-dd") : "No start");
+				if(this.has('ongoing')) {
+					str.push('ongoing');
+				} else {
+					var end = this.get('end');
+					str.push(end ? $.format.date(end, "yyyy-MM-dd") : "No end");
+				}
+				var location = this.get('location');
+				str.push(location ? location.toString() : "Unknown");
+				return str.join(' ');
+			},
 			checkDates: function() {
 				// check parsed templates of dates have not been found yet
 				if(!this.has('start') && this.has('templates')) {
 					var infobox = this.get('templates').findByType('infobox');
+					var dates;
 					if(infobox) {
-						var period = infobox.period();
-						if(period && period.length == 2) {
-							this.set({start: period[0]});
-							this.set({end: period[1]});
-						} else {
-							// single day event
-							var start = infobox.firstDate();
-							if(start) {
-								this.set({start: start, end: start});
-							}
+						dates = infobox.period();
+					}
+					if(!dates) {
+						dates = DateParser.parse(this.get('sentence'));
+					}
+					if(!dates) {
+						dates = DateParser.parse(this.get('paragraph'));
+					}
+					if(dates) {
+						this.set({start: dates[0]});
+						this.set({end: dates[1]});
+						if(new Date() - this.get('end') < 10*1000) {
+							this.set({ongoing: true});
 						}
 					}
 				}
@@ -234,10 +455,18 @@ define(["jquery",
 				$.getJSON(url, function(res){
 					App.status("Extracting page features...");
 					// INSIGHT better to parse the HTML than wikitext
+					var text = res.parse.text['*'].replace(/<img[^>]+>/ig, "<img>");
+					var $text = $(text);
+					var paragraph = $text.next('p').text();
+					var sentence = paragraph.split('.')[0];
+					me.set({
+						text: text,
+						sentence: sentence, // 1st
+						paragraph: paragraph // 1st
+					});
+
 					var attr = {};
-					attr.text = res.parse.text['*'].replace(/<img[^>]+>/ig, "<img>");
-					var $text = $("<text>{0}</text>".format(attr.text));
-					var infobox = $text.find('.infobox').first();
+					var infobox = $text.next('.infobox').first();
 
 					// article location
 					var location = $text.find('#coordinates .geo').first();
@@ -252,13 +481,18 @@ define(["jquery",
 
 					if(me.isMain()) {
 						// dont give up on article location
-						var country = $('.flagicon a', infobox);
+						var flag = $('.location', infobox);
+						var country = $('a', flag);
+						// TODO location candidates , e.g. Maspero demonstrations
+						if(!country.length) {
+							country = flag.next('a');
+						}
 						// check for flag
 						if(country = country.attr('title')) {
-							attr.country = country;
+							attr.country = Countries.isCountry(country);
 						} else {
 							// check first paragraph for country names
-							var links = $text.find('p').first().children('a');
+							var links = $text.next('p').first().children('a');
 							_.each(links, function(l) {
 								if(!country) {
 									var c = Countries.isCountry(l.title);
@@ -269,15 +503,19 @@ define(["jquery",
 							});
 						}
 
-						// event interval
+						// event interval with hcard annotations
 						var start = $('.dtstart', infobox);
 						if(start = start.text()) {
 							attr.start = start;
-						}
 
-						var end = $('.dtend', infobox);
-						if(end = end.text()) {
-							attr.end = end;
+							var end = $('.dtend', infobox);
+							if(end = end.text()) {
+								attr.end = end;
+							} else {
+								// TODO mark as ongoing
+								attr.end = new Date();
+								attr.ongoing = true;
+							}
 						}
 
 						// articles in other lang editions
@@ -294,11 +532,14 @@ define(["jquery",
 					}
 					App.status();
 					me.set(attr);
+					// short circuit here with false
+					var signal = me.has('start') || !me.isMain() ? 'additional' : 'done';
 					if(country && !location && me.isMain()) {
 						// trying to get location from country in infobox
-						Location.fromArticle(country, me, 'additional');
+						// TODO dont just try country, see Ulster_Workers%27_Council_strike
+						Location.fromArticle(country, me, signal);
 					} else {
-						me.trigger('additional');
+						me.trigger(signal);
 					}
 				});
 			},
@@ -391,7 +632,6 @@ define(["jquery",
 			fetchPages: function(title) {
 				this.title = title;
 				this.retrieve();
-				this.trigger('ha');
 			},
 			url: function() {
 				var offset = this.offset || "";
@@ -400,7 +640,7 @@ define(["jquery",
 			},
 			parse: function(res) {
 				var pages = res.query.embeddedin;
-				if(pages["-1"]) {
+				if(!pages.length) {
 					App.error("Invalid template.");
 					return;
 				}
@@ -456,18 +696,14 @@ define(["jquery",
 
 		window.Template = Model.extend({
 			period: function() {
-				var m;
-			   	if(m = this.match(/\|\s*date\s*=\s*([^-–|]*)\s*[-–]\s*([^-–|]*)\s*\|/)) {
-					return m
-				}
-			},
-			firstDate: function() {
-				var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-				var re = "[ _]date\\s?=\\s?(\\d{1,2}) ({0}) (\\d{2,4})".format(MONTHS.join('|'));
-				console.log(re);
-			   	if(m = this.match(new RegExp(re))) {
-					return m.join(' ');
-				}
+				var m, dates;
+			   	if(m = this.match(/\|\s*(date|election_date)\s*=(.*)/)) {
+					if(dates = DateParser.parse(m[1])) {
+						return dates;
+					} else {
+						console.log("Cannot parse date in infobox ", m, Article.toString());
+					}
+				} 
 			},
 			match: function(reg) {
 				var m = this.get('content').match(reg); 
@@ -499,7 +735,7 @@ define(["jquery",
 						content: content
 					};
 					if(stop > 0) {
-						obj.type = content.slice(0, stop);
+						obj.type = content.slice(0, stop).trim();
 					}
 					return obj;
 				});
@@ -811,7 +1047,7 @@ define(["jquery",
 						if(country) {
 							attr.country = country;
 							attr.context = context;
-							console.log(this.get('title'), pattern, country);
+							//console.log(this.get('title'), pattern, country);
 							this.trigger('country', this.get('author'), country);
 						}
 					}
@@ -1177,11 +1413,19 @@ define(["jquery",
 				this.container = $('#content .container');
 				this.nav = $('.topbar ul.nav');
 			},
+			analyzeNext: function() {
+				if(window.Article) {
+					console.log(Article.toString());
+				}
+				var next = _.random(Group.models);
+				if(next) {
+					var article = App.analyzeArticle(next.id);
+					article.bind('done', this.analyzeNext, this);
+				}
+			},
 			analyzeGroup: function(input) {
 				window.Group = new TemplateEmbedders;
-				Group.bind('loaded', function() {
-					App.analyzeArticle(_.random(this.models).id);
-				}, Group);
+				Group.bind('loaded', this.analyzeNext, this);
 				Group.fetchPages(input);
 			},
 			analyzeArticle: function(input) {
@@ -1222,6 +1466,7 @@ define(["jquery",
 
 				// kick things off
 				Article.set({input: input});
+				return Article;
 			},
 			status: _.throttle(function(msg) {
 				if(!msg) {
