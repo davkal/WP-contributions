@@ -17,6 +17,8 @@ define(["jquery",
 
 		window.CACHE_LIMIT = 50000; // (bytes, approx.) keep low, big pages are worth the transfer
 		window.GROUP_DELAY = 10 * 1000; // (ms) time before analyzing next article
+		window.RE_PARENTHESES = /\([^\)]*\)/g;
+		window.RE_WIKI_LINK = /\[\[[^\]]*\]\]/g;
 
 		window.Model = Backbone.Model.extend({
 			checkDate: function(obj, attr) {
@@ -188,14 +190,30 @@ define(["jquery",
 				return str.join(' ');
 			},
 			parseDates: function($infobox) {
-				var dates, infobox, dateField;
+				// TODO try collection candidates and then parse then all by first pattern, ...
+				// this would help broken dates that also appear correct in 1st sentence.
+				// e.g. "Start date|1908|28|01" Municipal Library Elevator Coup
+
+				var dates, start, end, infobox, dateField;
 				// event interval with hcard annotations
-				var start = $('.dtstart', $infobox);
-				if(start = start.text()) {
+				var $start = $('.dtstart', $infobox);
+				if(start = $start.text()) {
 					start = new Date(start);
-					var end = $('.dtend', $infobox).text();
-					end = end ? new Date(end) : new Date();
-					dates = [start, end];
+					var $end = $('.dtend', $infobox);
+					if(end = $end.text()) {
+						// end date present
+						end = new Date(end);
+					} else if($start.parents('td, p').first().text().match(/(ongoing|present)/)) {
+						// ongoing
+						end = new Date();
+					} else {
+						// single day event
+						end = new Date(start);
+						end.setDate(start.getDate() + 1);
+					}
+					if(!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+						dates = [start, end];
+					}
 				}
 				// check parsed templates of dates have not been found yet
 				if(!dates && this.has('templates')) {
@@ -209,10 +227,10 @@ define(["jquery",
 					}
 				}
 				if(!dates) {
-					dates = DateParser.parse(this.get('sentence'));
+					dates = DateParser.parse(this.get('sentence').replace(RE_PARENTHESES, ""));
 				}
 				if(!dates) {
-					dates = DateParser.parse(this.get('paragraph'));
+					dates = DateParser.parse(this.get('paragraph').replace(RE_PARENTHESES, ""));
 				}
 				if(dates) {
 					this.set({start: dates[0]});
@@ -223,19 +241,19 @@ define(["jquery",
 				}
 			},
 			parseLocation: function($text, $infobox) {
+				// TODO Murder of Selena 
 				// location from template
 				var template, links, csv, tokens, ands = [], candidates = [];
 			   	if(template = this.get('templates').findByType('infobox')) {
 					var toparse = template.location();
 					if(toparse) {
-						var linkRe = /\[\[[^\]]*\]\]/g;
-						links = toparse.match(linkRe);
+						links = toparse.match(RE_WIKI_LINK);
 						links = _.map(links, function(l) {
 							// removing brackets and cutting off visible text
 							tokens = l.replace(/\[/g, "").replace(/\]/g, "").split('|');
 							return tokens[0].trim();
 						});
-						toparse = toparse.replace(linkRe, "");
+						toparse = toparse.replace(RE_WIKI_LINK, "");
 						// removing parentheses
 						toparse = toparse.replace(/\(/g, ",").replace(/\)/g, "");
 
@@ -268,7 +286,7 @@ define(["jquery",
 				});
 
 				// check first paragraph for anything
-				var links = $text.next('p').first().children('a');
+				var links = $text.find('p').first().children('a');
 				_.each(links, function(l) {
 					if(l.title) {
 						candidates.push(l.title.trim());
@@ -277,7 +295,7 @@ define(["jquery",
 
 				candidates =  _.uniq(_.compact(candidates));
 				if(_.size(candidates) > 10) {
-					console.log("Too many location candidates, cutting:", candidates.slice(10));
+					//console.log("Too many location candidates, cutting:", candidates.slice(10));
 					candidates = candidates.slice(0, 10);
 				}
 				return candidates;
@@ -299,8 +317,8 @@ define(["jquery",
 
 					// INSIGHT better to parse the HTML than wikitext
 					var text = res.parse.text['*'].replace(/<img[^>]+>/ig, "<img>");
-					var $text = $(text);
-					var paragraph = $text.next('p').text();
+					var $text = $("<wikitext>{0}</wikitext>".format(text));
+					var paragraph = $text.find('p').first().text();
 					var sentence = paragraph.split('.')[0];
 					me.set({
 						text: text,
@@ -309,10 +327,7 @@ define(["jquery",
 					});
 
 					var attr = {};
-					var $infobox = $text.next('.infobox').first();
-					if(!$infobox.length) {
-						$infobox = $text.find('.infobox').first();
-					}
+					var $infobox = $text.find('.infobox').first();
 
 					// article location
 					var location = $text.find('#coordinates .geo').first();
@@ -320,13 +335,15 @@ define(["jquery",
 						// coords maybe inside infobox
 						location = $('.geo', $infobox).first();
 					}
-					if(location = CoordsParser.parse(location.text())) {
-						attr.location = new Location(location);
+					if(location = location.text()) {
+						if(location = CoordsParser.parse(location)) {
+							attr.location = new Location(location);
+						}
 					}
 					var locationCandidates;
 
 					if(me.isMain()) {
-						if(!location) { 
+						if(!attr.location) { 
 							// in case no coordinates were found
 							locationCandidates = me.parseLocation($text, $infobox);
 						}
@@ -349,8 +366,7 @@ define(["jquery",
 					// short circuit if this is used as helper page
 					var signal = App.details && me.isMain() ? 'additional' : 'done';
 					if(locationCandidates) {
-						// trying to get location from country in infobox
-						console.log("Trying location candidates", locationCandidates.slice(0));
+						//console.log("Trying location candidates", locationCandidates.slice(0));
 						Location.fromArticle(locationCandidates, me, signal);
 					} else {
 						me.trigger(signal);
@@ -442,36 +458,49 @@ define(["jquery",
 			}
 		});
 
-		// TODO try templates
-		// Infobox_military_conflict
-		// Infobox_civil_conflict
-		// Infobox_historical_event
-		// TODO Category:Political_riots
+		// Template:Infobox_military_conflict
+		// Template:Infobox_civil_conflict
+		// Template:Infobox_historical_event
+		// Category:Political_riots
 
-		window.TemplateEmbedders = Collection.extend({
+		window.PageList = Collection.extend({
 			model: Page,
 			offset: null,
 			fetchPages: function(title) {
+				// template or category?
 				this.title = title;
+				this.prefix = title.split(':')[0];
+				if(this.prefix != 'Template' && this.prefix != 'Category') {
+					App.error('Not a valid template or category.');
+					return;
+				}
+				var isTemplate = this.prefix == 'Template';
+
+				this.listkey = isTemplate ? "embeddedin" : "categorymembers";
+				this.titlekey = isTemplate ? "eititle" : "cmtitle";
+				this.limitkey = isTemplate ? "eilimit" : "cmlimit";
+				this.namespace = isTemplate ? "einamespace" : "cmnamespace";
+
 				this.retrieve();
 			},
 			url: function() {
 				var offset = this.offset || "";
-				var url = "http://{0}.wikipedia.org/w/api.php?action=query&list=embeddedin&format=json&eititle=Template%3A{1}&einamespace=0&eilimit=500&redirects&callback=?{2}".format('en', this.title, offset);
+				var url = "http://{0}.wikipedia.org/w/api.php?action=query&list={1}&format=json&{2}={3}&{4}=0&{5}=50&redirects&callback=?{6}".format('en', this.listkey, this.titlekey, this.title, this.namespace, this.limitkey, offset);
 				return url;
 			},
 			parse: function(res) {
-				var pages = res.query.embeddedin;
+				var pages = res.query[this.listkey];
 				if(!pages.length) {
-					App.error("Invalid template.");
+					App.error("Invalid template/category.");
 					return;
 				}
 				_.each(pages, function(p) {
 					p.id = p.pageid;;
 				});
 				if(this.continue && res['query-continue']) {
-					var next = res['query-continue'].embeddedin['eicontinue'];
-					this.offset = "&eicontinue={0}".format(next);
+					var key = _.first(_.keys(res['query-continue'][this.listkey]));
+					var next = res['query-continue'][this.listkey][key];
+					this.offset = "&{0}={1}".format(key, next);
 					this.page++;
 					App.status("Next template articles ({0})...".format(this.page));
 					_.defer(_.bind(this.retrieve, this));
@@ -520,13 +549,13 @@ define(["jquery",
 		window.Template = Model.extend({
 			date: function() {
 				var m;
-			   	if(m = this.match(/\|\s*(date|election_date)\s*=(.*)/)) {
+			   	if(m = this.match(/\|\s*(date|election_date)\s*=(.*)/i)) {
 					return m[1];
 				} 
 			},
 			location: function() {
 				var m;
-			   	if(m = this.match(/\|\s*(place|location)\s*=(.*)/)) {
+			   	if(m = this.match(/\|\s*(place|location)\s*=(.*)/i)) {
 					return m[1];
 				} 
 			},
@@ -1075,7 +1104,7 @@ define(["jquery",
 					}
 					if(start) {
 						this.display('Start', $.format.date(new Date(start), "yyyy-MM-dd"));
-						this.display('End/Status', end ? $.format.date(new Date(end), "yyyy-MM-dd") : 'ongoing');
+						this.display('End/Status', Article.has('ongoing') ? 'ongoing' : $.format.date(new Date(end), "yyyy-MM-dd"));
 					}
 				}
 				return this;
@@ -1241,21 +1270,24 @@ define(["jquery",
 				this.nav = $('.topbar ul.nav');
 			},
 			analyzeNext: function() {
-				if(window.Article) {
-					console.log(Article.toString());
+				var previous = window.Article;
+				if(previous) {
+					console.log(previous.toString());
 				}
+				var delay = previous ? GROUP_DELAY : 0;
 				var next = _.random(Group.models);
 				var me = this;
 				if(next) {
 					_.debounce(function() {
 						var article = App.analyzeArticle(next.id);
 						article.bind('done', me.analyzeNext, me);
-					}, GROUP_DELAY)();
+					}, delay)();
 				}
 			},
 			analyzeGroup: function(input) {
-				window.Group = new TemplateEmbedders;
+				window.Group = new PageList;
 				Group.bind('loaded', this.analyzeNext, this);
+				App.status("Page list...");
 				Group.fetchPages(input);
 			},
 			analyzeArticle: function(input) {
@@ -1272,7 +1304,7 @@ define(["jquery",
 				Article.bind('change:location', pv.render, pv);
 				Article.bind('found', av.render, av);
 
-				if(this.details) {
+				if(this.details && google.visualization) {
 					var authors = Article.get('authors');
 					var revisions = Article.get('revisions');
 					var current = Article.get('current');
@@ -1355,6 +1387,13 @@ define(["jquery",
 					.addClass('error');
 				App.status(text);
 			}, 
+			checkGroup: _.throttle(function(text) {
+				var isGroup = false;
+				if(text.indexOf(':')>=0) {
+					isGroup = true;
+				}
+				this.$group.prop('checked', isGroup).change();
+			}, 1000),
 			analyze: function(input) {
 				if(this.$group.prop('checked')) {
 					this.details = false;
@@ -1366,12 +1405,7 @@ define(["jquery",
 			},
 			analyzeExample: function(e) {
 				var input = $(e.target).attr("title");
-				var isGroup = false;
-				if(input.startsWith('Template:')) {
-					input = input.substr(9);
-					isGroup = true;
-				}
-				this.$group.prop('checked', isGroup).change();
+				this.checkGroup(input);
 				this.input.val(input);
 				return this.analyzeOnClick();
 			},
@@ -1384,6 +1418,7 @@ define(["jquery",
 			},
 			analyzeOnEnter: function(e) {
 				var text = this.input.val();
+				this.checkGroup(text);
 				if (!text || (e.keyCode != 13)) return;
 				this.analyze(text);
 				return false;

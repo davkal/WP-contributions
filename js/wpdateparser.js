@@ -9,7 +9,7 @@ define(["jquery", "underscore" ], function($, _) {
 		M: "({0})".format(months.join('|')), // months
 		D: "(\\d{1,2})" + "({0})?".format(ords.join('|')), // day
 		Y: "(\\d{4})", // year
-		T: "(-|–|\\sto\\s|\\sand\\s)", // interval delimiter
+		T: "(/|-|–|\\sto\\s|\\sand\\s)", // interval delimiter
 		O: "('*ongoing'*?|'*present'*)", // ongoing event
 		F: "From", // ongoing event
 		S: "[,\\s]*", // whitespace

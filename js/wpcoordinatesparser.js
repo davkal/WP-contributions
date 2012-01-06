@@ -54,7 +54,7 @@ define(["jquery", "underscore" ], function($, _) {
 				longitude: loc[1]
 			};
 		} else {
-			console.log("No match for geotag.");
+			console.log("No match for geotag.", text.substring(0, 20));
 		}
 	}
 
