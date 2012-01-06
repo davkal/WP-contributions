@@ -421,26 +421,34 @@ define(["jquery",
 				str.push(location ? location.toString() : "Unknown");
 				return str.join(' ');
 			},
-			checkDates: function() {
+			parseDates: function($infobox) {
+				var dates;
+				// event interval with hcard annotations
+				var start = $('.dtstart', $infobox);
+				if(start = start.text()) {
+					start = new Date(start);
+					var end = $('.dtend', $infobox).text();
+					end = end ? new Date(end) : new Date();
+					dates = [start, end];
+				}
 				// check parsed templates of dates have not been found yet
-				if(!this.has('start') && this.has('templates')) {
+				if(!dates && this.has('templates')) {
 					var infobox = this.get('templates').findByType('infobox');
-					var dates;
 					if(infobox) {
 						dates = infobox.period();
 					}
-					if(!dates) {
-						dates = DateParser.parse(this.get('sentence'));
-					}
-					if(!dates) {
-						dates = DateParser.parse(this.get('paragraph'));
-					}
-					if(dates) {
-						this.set({start: dates[0]});
-						this.set({end: dates[1]});
-						if(new Date() - this.get('end') < 10*1000) {
-							this.set({ongoing: true});
-						}
+				}
+				if(!dates) {
+					dates = DateParser.parse(this.get('sentence'));
+				}
+				if(!dates) {
+					dates = DateParser.parse(this.get('paragraph'));
+				}
+				if(dates) {
+					this.set({start: dates[0]});
+					this.set({end: dates[1]});
+					if(new Date() - this.get('end') < 10*1000) {
+						this.set({ongoing: true});
 					}
 				}
 			},
@@ -466,13 +474,13 @@ define(["jquery",
 					});
 
 					var attr = {};
-					var infobox = $text.next('.infobox').first();
+					var $infobox = $text.next('.infobox').first();
 
 					// article location
 					var location = $text.find('#coordinates .geo').first();
 					if(!location.length) {
 						// coords maybe inside infobox
-						location = $('.geo', infobox).first();
+						location = $('.geo', $infobox).first();
 					}
 
 					if(location = Location.parseCoords(location.text())) {
@@ -481,7 +489,7 @@ define(["jquery",
 
 					if(me.isMain()) {
 						// dont give up on article location
-						var flag = $('.location', infobox);
+						var flag = $('.location', $infobox);
 						var country = $('a', flag);
 						// TODO location candidates , e.g. Maspero demonstrations
 						if(!country.length) {
@@ -503,20 +511,7 @@ define(["jquery",
 							});
 						}
 
-						// event interval with hcard annotations
-						var start = $('.dtstart', infobox);
-						if(start = start.text()) {
-							attr.start = start;
-
-							var end = $('.dtend', infobox);
-							if(end = end.text()) {
-								attr.end = end;
-							} else {
-								// TODO mark as ongoing
-								attr.end = new Date();
-								attr.ongoing = true;
-							}
-						}
+						me.parseDates($infobox);
 
 						// articles in other lang editions
 						var languages = [{
@@ -528,7 +523,6 @@ define(["jquery",
 							languages.push({title: ll['*'], lang: ll.lang});
 						});
 						me.get('languages').reset(languages);
-						me.checkDates();
 					}
 					App.status();
 					me.set(attr);
