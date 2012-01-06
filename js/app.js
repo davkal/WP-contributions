@@ -223,12 +223,33 @@ define(["jquery",
 			},
 			parseLocation: function($text, $infobox) {
 				// location from template
-				var template, candidates = [];
+				var template, links, csv, tokens, ands = [], candidates = [];
 			   	if(template = this.get('templates').findByType('infobox')) {
-					// TODO location candidates , e.g. Maspero demonstrations
-					// TODO dont just try country, see Ulster_Workers%27_Council_strike
-					candidates2 = template.location();
-					console.log("Template locations", candidates2);
+					var toparse = template.location();
+
+					var linkRe = /\[\[[^\]]*\]\]/g;
+					links = toparse.match(linkRe);
+					links = _.map(links, function(l) {
+						// removing brackets and cutting off visible text
+						tokens = l.replace(/\[/g, "").replace(/\]/g, "").split('|');
+						return tokens[0].trim();
+					});
+					toparse = toparse.replace(linkRe, "");
+					// removing parentheses
+					toparse = toparse.replace(/\(/g, ",").replace(/\)/g, "");
+
+					csv = toparse.split(',');
+					csv = _.map(csv, function(v) {
+						tokens = v.split('|');
+						return _.last(tokens).trim();
+					});
+					_.each(csv, function(v) {
+						if(v.indexOf(' and ') > 0) {
+							ands = _.union(ands, v.split(' and '));
+						}
+					});
+
+					candidates = _.union(candidates, links, csv, ands);
 				}
 
 				// look for various location containers
@@ -240,7 +261,7 @@ define(["jquery",
 						link = container.next('a');
 					}
 					if(link = link.attr('title')) {
-						candidates.push(link);
+						candidates.push(link.trim());
 					}
 				});
 
@@ -248,10 +269,15 @@ define(["jquery",
 				var links = $text.next('p').first().children('a');
 				_.each(links, function(l) {
 					if(l.title) {
-						candidates.push(l.title);
+						candidates.push(l.title.trim());
 					}
 				});
 
+				candidates =  _.uniq(_.compact(candidates));
+				if(_.size(candidates) > 10) {
+					console.log("Too many location candidates, cutting:", candidates.slice(10));
+					candidates = candidates.slice(0, 10);
+				}
 				return candidates;
 			},
 			fetchAdditionalData: function() {
@@ -263,6 +289,10 @@ define(["jquery",
 				}
 				App.status("Getting HTML for  {0}...".format(this.get('title') || this.get('pageid')));
 				$.getJSON(url, function(res){
+					if(res.error) {
+						me.trigger('done');
+						return;
+					}
 					App.status("Extracting page features...");
 
 					// INSIGHT better to parse the HTML than wikitext
@@ -791,6 +821,7 @@ define(["jquery",
 				var attr = {};
 				if(res.parse) {
 					var countries = [], candidate;
+					// TODO use article candidate mechanism
 					// candidate countries
 					_.each(res.parse.links, function(l) {
 						if(candidate = Countries.isCountry(l['*'])) {
