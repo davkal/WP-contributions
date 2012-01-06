@@ -135,13 +135,13 @@ define(["jquery", "underscore" ], function($, _) {
 	// 15 October 2011
 	patterns[expand("%D%M%Y")] = function(m) {
 		var year = m[3], month = getMonth(m[2]), date1 = m[1];
-		return [new Date(year, month, date1), new Date(year, month, parseInt(date1) + 1)];
+		return [new Date(year, month, date1), new Date(year, month, date1)];
 	};
 
 	// October 15 2011
 	patterns[expand("%M%D%Y")] = function(m) {
 		var year = m[3], month = getMonth(m[1]), date1 = m[2];
-		return [new Date(year, month, date1), new Date(year, month, parseInt(date1) + 1)];
+		return [new Date(year, month, date1), new Date(year, month, date1)];
 	};
 
 	// October 2011 
@@ -186,7 +186,7 @@ define(["jquery", "underscore" ], function($, _) {
 	test("December 14-19, 1970", new Date(1970, 11, 14), new Date(1970, 11, 19));
 	test("21 to 31 August 1992", new Date(1992, 7, 21), new Date(1992, 7, 31));
 	test("12 and 17 May 1992", new Date(1992, 4, 12), new Date(1992, 4, 17));
-	test("15 October 2011", new Date(2011, 9, 15), new Date(2011, 9, 16));
+	test("15 October 2011", new Date(2011, 9, 15), new Date(2011, 9, 15));
 	test("May 1968 - June 1968", new Date(1968, 4, 1), new Date(1968, 5, 30));
 	test("May 1968", new Date(1968, 4, 1), new Date(1968, 4, 30));
 	test("1968", new Date(1968, 0, 1), new Date(1968, 11, 31));

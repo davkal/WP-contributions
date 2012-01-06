@@ -168,10 +168,10 @@ define(["jquery",
 			},
 			phase: function() {
 				if(this.has('start')) {
-					if(this.has('end')) {
-						return 2; // ended
+					if(this.get('ongoing')) {
+						return 1; // ongoing
 					}
-					return 1; // ongoing
+					return 2; // ended
 				} 
 				return 0; // w/o interval
 			},
@@ -1103,8 +1103,10 @@ define(["jquery",
 						this.display('Location', "{0}; {1}".format(loc.get('latitude').toFixed(3), loc.get('longitude').toFixed(3)));
 					}
 					if(start) {
-						this.display('Start', $.format.date(new Date(start), "yyyy-MM-dd"));
-						this.display('End/Status', Article.has('ongoing') ? 'ongoing' : $.format.date(new Date(end), "yyyy-MM-dd"));
+						this.display('Date', $.format.date(new Date(start), "yyyy-MM-dd"));
+						if(start && end && end - start > 10000) {
+							this.display('End/Status', Article.has('ongoing') ? 'ongoing' : $.format.date(new Date(end), "yyyy-MM-dd"));
+						}
 					}
 				}
 				return this;
