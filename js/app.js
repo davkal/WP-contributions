@@ -95,22 +95,37 @@ define(["jquery",
 				this.set({distance: Location.geodesicDistance(this, loc)});
 			}
 		}, {
-			fromArticle: function(title, target, signal) {
-				var article = new Page({title: title, lang: Article.get('lang')});
-				article.bind('additional', function() {
-					var loc = article.get('location');
-					if(loc) {
-						loc = loc.clone();
-						if(Countries.isCountry(title)) {
-							loc.set({region: title});
+			fromArticle: function(candidates, target, signal) {
+				var title = candidates.shift();
+
+				// short cut when country
+				var country = Countries.isCountry(title);
+				if(country) {
+					target.set({location: country.clone()});
+					target.trigger(signal);
+				} else {
+					console.log("Trying loc candidate", title);
+					var article = new Page({title: title, lang: Article.get('lang')});
+					article.bind('done', function() {
+						var loc = article.get('location');
+						if(loc) {
+							loc = loc.clone();
+							if(Countries.isCountry(title)) {
+								loc.set({region: title});
+							}
+							target.set({location: loc});
+							// loc found, no need to search more
+							target.trigger(signal);
+						} else if(candidates.length) {
+							// no location, look for next candidate
+							Location.fromArticle(candidates, target, signal);
+						} else {
+							// no more candidates, giving up
+							target.trigger(signal);
 						}
-						target.set({location: loc});
-					}
-					if(signal) {
-						target.trigger(signal);
-					}
-				});
-				article.fetchAdditionalData();
+					});
+					article.fetchAdditionalData();
+				}
 			},
 			deg2rad: function(deg) {
 				return parseFloat(deg) / 180 * Math.PI;
@@ -172,7 +187,7 @@ define(["jquery",
 				return str.join(' ');
 			},
 			parseDates: function($infobox) {
-				var dates;
+				var dates, infobox, dateField;
 				// event interval with hcard annotations
 				var start = $('.dtstart', $infobox);
 				if(start = start.text()) {
@@ -183,9 +198,13 @@ define(["jquery",
 				}
 				// check parsed templates of dates have not been found yet
 				if(!dates && this.has('templates')) {
-					var infobox = this.get('templates').findByType('infobox');
-					if(infobox) {
-						dates = infobox.period();
+					if(infobox = this.get('templates').findByType('infobox')) {
+						if(dateField = infobox.date()) {
+							dates = DateParser.parse(dateField);
+							if(!dates) {
+								console.log("Cannot parse date in infobox ", m, Article.toString());
+							}
+						}
 					}
 				}
 				if(!dates) {
@@ -202,6 +221,39 @@ define(["jquery",
 					}
 				}
 			},
+			parseLocation: function($text, $infobox) {
+				// location from template
+				var template, candidates = [];
+			   	if(template = this.get('templates').findByType('infobox')) {
+					// TODO location candidates , e.g. Maspero demonstrations
+					// TODO dont just try country, see Ulster_Workers%27_Council_strike
+					candidates2 = template.location();
+					console.log("Template locations", candidates2);
+				}
+
+				// look for various location containers
+				_.each(['.location', '.flagicon'], function(cls) {
+					var container = $(cls, $infobox);
+					var link = $('a', container);
+					if(!link.length) {
+						// sometimes link is next to location div
+						link = container.next('a');
+					}
+					if(link = link.attr('title')) {
+						candidates.push(link);
+					}
+				});
+
+				// check first paragraph for anything
+				var links = $text.next('p').first().children('a');
+				_.each(links, function(l) {
+					if(l.title) {
+						candidates.push(l.title);
+					}
+				});
+
+				return candidates;
+			},
 			fetchAdditionalData: function() {
 				var me = this;
 				var url = "http://{0}.wikipedia.org/w/api.php?action=parse&format=json&callback=?&".format(this.get('lang'));
@@ -212,6 +264,7 @@ define(["jquery",
 				App.status("Getting HTML for  {0}...".format(this.get('title') || this.get('pageid')));
 				$.getJSON(url, function(res){
 					App.status("Extracting page features...");
+
 					// INSIGHT better to parse the HTML than wikitext
 					var text = res.parse.text['*'].replace(/<img[^>]+>/ig, "<img>");
 					var $text = $(text);
@@ -232,33 +285,15 @@ define(["jquery",
 						// coords maybe inside infobox
 						location = $('.geo', $infobox).first();
 					}
-
 					if(location = CoordsParser.parse(location.text())) {
 						attr.location = new Location(location);
 					}
+					var locationCandidates;
 
 					if(me.isMain()) {
-						// dont give up on article location
-						var flag = $('.location', $infobox);
-						var country = $('a', flag);
-						// TODO location candidates , e.g. Maspero demonstrations
-						if(!country.length) {
-							country = flag.next('a');
-						}
-						// check for flag
-						if(country = country.attr('title')) {
-							attr.country = Countries.isCountry(country);
-						} else {
-							// check first paragraph for country names
-							var links = $text.next('p').first().children('a');
-							_.each(links, function(l) {
-								if(!country) {
-									var c = Countries.isCountry(l.title);
-									if(c) {
-										country = c.id;
-									}
-								}
-							});
+						if(!location) { 
+							// in case no coordinates were found
+							locationCandidates = me.parseLocation($text, $infobox);
 						}
 
 						me.parseDates($infobox);
@@ -276,12 +311,12 @@ define(["jquery",
 					}
 					App.status();
 					me.set(attr);
-					// short circuit here with false
-					var signal = me.has('start') || !me.isMain() ? 'additional' : 'done';
-					if(country && !location && me.isMain()) {
+					// short circuit if this is used as helper page
+					var signal = App.details && me.isMain() ? 'additional' : 'done';
+					if(locationCandidates) {
 						// trying to get location from country in infobox
-						// TODO dont just try country, see Ulster_Workers%27_Council_strike
-						Location.fromArticle(country, me, signal);
+						console.log("Trying location candidates", locationCandidates.slice(0));
+						Location.fromArticle(locationCandidates, me, signal);
 					} else {
 						me.trigger(signal);
 					}
@@ -320,21 +355,24 @@ define(["jquery",
 
 				this.bind('change:input', this.retrieve, this); 
 				this.bind('change:pageid', this.fetchAdditionalData, this); 
-				this.bind('additional', authors.retrieve, authors);
 
-				authors.bind('loaded', revisions.retrieve, revisions);
-				authors.bind('loaded', this.calcSignatureDistance, this);
-				authors.bind('loaded', authors.checkUserPages, authors);
+				if(App.details) {
+					this.bind('additional', authors.retrieve, authors);
 
-				revisions.bind('loaded', revisions.current, revisions);
+					authors.bind('loaded', revisions.retrieve, revisions);
+					authors.bind('loaded', this.calcSignatureDistance, this);
+					authors.bind('loaded', authors.checkUserPages, authors);
 
-				current.bind('change:id', current.fetchAuthors, current);
+					revisions.bind('loaded', revisions.current, revisions);
 
-				languages.bind('reset', languages.fetchNext, languages);
-				languages.bind('change', languages.fetchNext, languages);
+					current.bind('change:id', current.fetchAuthors, current);
 
-				languages.bind('done', function(){this.done('languages')}, this);
-				authors.bind('done', function(){this.done('authors')}, this);
+					languages.bind('reset', languages.fetchNext, languages);
+					languages.bind('change', languages.fetchNext, languages);
+
+					languages.bind('done', function(){this.done('languages')}, this);
+					authors.bind('done', function(){this.done('authors')}, this);
+				}
 
 				this.set({
 					authors: authors,
@@ -439,14 +477,16 @@ define(["jquery",
 		});
 
 		window.Template = Model.extend({
-			period: function() {
-				var m, dates;
+			date: function() {
+				var m;
 			   	if(m = this.match(/\|\s*(date|election_date)\s*=(.*)/)) {
-					if(dates = DateParser.parse(m[1])) {
-						return dates;
-					} else {
-						console.log("Cannot parse date in infobox ", m, Article.toString());
-					}
+					return m[1];
+				} 
+			},
+			location: function() {
+				var m;
+			   	if(m = this.match(/\|\s*(place|location)\s*=(.*)/)) {
+					return m[1];
 				} 
 			},
 			match: function(reg) {
@@ -1142,6 +1182,7 @@ define(["jquery",
 
 		window.AppView = Backbone.View.extend({
 			el: $("body"),
+			details: true,
 			events: {
 				"click #clear": "clear",
 				"click #cache": "clearCache",
@@ -1162,9 +1203,10 @@ define(["jquery",
 					console.log(Article.toString());
 				}
 				var next = _.random(Group.models);
+				var me = this;
 				if(next) {
 					var article = App.analyzeArticle(next.id);
-					article.bind('done', this.analyzeNext, this);
+					article.bind('done', me.analyzeNext, me);
 				}
 			},
 			analyzeGroup: function(input) {
@@ -1179,34 +1221,38 @@ define(["jquery",
 
 				window.Article = new MainArticle;
 
-				var authors = Article.get('authors');
-				var revisions = Article.get('revisions');
-				var current = Article.get('current');
-
 				var av = new Overview();
 				var pv = new PropertiesView();
-				var mv = new MapView();
-				var sv = new SurvivorView();
-				var dv = new LocalnessView();
-				var hv = new HypothesesView();
 
 				Article.bind('change:pageid', av.render, av);
 				Article.bind('change:location', pv.render, pv);
-				Article.bind('change:location', dv.render, dv);
-				Article.bind('change:location', Countries.distance, Countries);
-				Article.bind('change:sig_dist', mv.render, mv);
 				Article.bind('found', av.render, av);
-				Article.bind('done', hv.render, hv);
 
-				authors.bind('loaded', av.render, av);
-				authors.bind('loaded', mv.render, mv);
-				authors.bind('userpages', mv.render, mv);
-				authors.bind('userpages', sv.render, sv);
-				authors.bind('userpages', dv.render, dv);
+				if(this.details) {
+					var authors = Article.get('authors');
+					var revisions = Article.get('revisions');
+					var current = Article.get('current');
 
-				revisions.bind('loaded', dv.render, dv);
+					var mv = new MapView();
+					var sv = new SurvivorView();
+					var dv = new LocalnessView();
+					var hv = new HypothesesView();
 
-				current.bind('change:authors', sv.render, sv);
+					Article.bind('change:location', dv.render, dv);
+					Article.bind('change:location', Countries.distance, Countries);
+					Article.bind('change:sig_dist', mv.render, mv);
+					Article.bind('done', hv.render, hv);
+
+					authors.bind('loaded', av.render, av);
+					authors.bind('loaded', mv.render, mv);
+					authors.bind('userpages', mv.render, mv);
+					authors.bind('userpages', sv.render, sv);
+					authors.bind('userpages', dv.render, dv);
+
+					revisions.bind('loaded', dv.render, dv);
+
+					current.bind('change:authors', sv.render, sv);
+				}
 
 				// kick things off
 				Article.set({input: input});
@@ -1267,8 +1313,10 @@ define(["jquery",
 			}, 
 			analyze: function(input) {
 				if(this.$group.prop('checked')) {
+					this.details = false;
 					this.analyzeGroup(input);
 				} else {
+					this.details = true;
 					this.analyzeArticle(input);
 				}
 			},
