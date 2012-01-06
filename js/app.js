@@ -226,30 +226,31 @@ define(["jquery",
 				var template, links, csv, tokens, ands = [], candidates = [];
 			   	if(template = this.get('templates').findByType('infobox')) {
 					var toparse = template.location();
+					if(toparse) {
+						var linkRe = /\[\[[^\]]*\]\]/g;
+						links = toparse.match(linkRe);
+						links = _.map(links, function(l) {
+							// removing brackets and cutting off visible text
+							tokens = l.replace(/\[/g, "").replace(/\]/g, "").split('|');
+							return tokens[0].trim();
+						});
+						toparse = toparse.replace(linkRe, "");
+						// removing parentheses
+						toparse = toparse.replace(/\(/g, ",").replace(/\)/g, "");
 
-					var linkRe = /\[\[[^\]]*\]\]/g;
-					links = toparse.match(linkRe);
-					links = _.map(links, function(l) {
-						// removing brackets and cutting off visible text
-						tokens = l.replace(/\[/g, "").replace(/\]/g, "").split('|');
-						return tokens[0].trim();
-					});
-					toparse = toparse.replace(linkRe, "");
-					// removing parentheses
-					toparse = toparse.replace(/\(/g, ",").replace(/\)/g, "");
+						csv = toparse.split(',');
+						csv = _.map(csv, function(v) {
+							tokens = v.split('|');
+							return _.last(tokens).trim();
+						});
+						_.each(csv, function(v) {
+							if(v.indexOf(' and ') > 0) {
+								ands = _.union(ands, v.split(' and '));
+							}
+						});
 
-					csv = toparse.split(',');
-					csv = _.map(csv, function(v) {
-						tokens = v.split('|');
-						return _.last(tokens).trim();
-					});
-					_.each(csv, function(v) {
-						if(v.indexOf(' and ') > 0) {
-							ands = _.union(ands, v.split(' and '));
-						}
-					});
-
-					candidates = _.union(candidates, links, csv, ands);
+						candidates = _.union(candidates, links, csv, ands);
+					}
 				}
 
 				// look for various location containers
