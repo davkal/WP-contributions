@@ -15,7 +15,8 @@ define(["jquery",
 			console.log(arguments);
 		};
 
-		window.CACHE_LIMIT = 50000; // keep low, big pages are worth the transfer
+		window.CACHE_LIMIT = 50000; // (bytes, approx.) keep low, big pages are worth the transfer
+		window.GROUP_DELAY = 10 * 1000; // (ms) time before analyzing next article
 
 		window.Model = Backbone.Model.extend({
 			checkDate: function(obj, attr) {
@@ -202,7 +203,7 @@ define(["jquery",
 						if(dateField = infobox.date()) {
 							dates = DateParser.parse(dateField);
 							if(!dates) {
-								console.log("Cannot parse date in infobox ", m, Article.toString());
+								console.log("Cannot parse date in infobox ", dateField, Article.toString());
 							}
 						}
 					}
@@ -309,6 +310,9 @@ define(["jquery",
 
 					var attr = {};
 					var $infobox = $text.next('.infobox').first();
+					if(!$infobox.length) {
+						$infobox = $text.find('.infobox').first();
+					}
 
 					// article location
 					var location = $text.find('#coordinates .geo').first();
@@ -364,8 +368,12 @@ define(["jquery",
 				if(res.query.export) {
 					var xml = $.parseXML(res.query.export['*']);
 					var text = $(xml).find('text').text();
-					page.wikitext = text;
-					page.templates = Templates.fromText(text);
+					var $text = $("<wikitext>{0}</wikitext>".format(text));
+					// removing useless markup
+					$text.find('ref').replaceWith('');
+					$text.find('nowiki').replaceWith('');
+					page.wikitext = $text.text();
+					page.templates = Templates.fromText(page.wikitext);
 				}
 				return page;
 			}
@@ -438,6 +446,7 @@ define(["jquery",
 		// Infobox_military_conflict
 		// Infobox_civil_conflict
 		// Infobox_historical_event
+		// TODO Category:Political_riots
 
 		window.TemplateEmbedders = Collection.extend({
 			model: Page,
@@ -464,6 +473,7 @@ define(["jquery",
 					var next = res['query-continue'].embeddedin['eicontinue'];
 					this.offset = "&eicontinue={0}".format(next);
 					this.page++;
+					App.status("Next template articles ({0})...".format(this.page));
 					_.defer(_.bind(this.retrieve, this));
 				} else {
 					this.offset = null;
@@ -1236,12 +1246,11 @@ define(["jquery",
 				}
 				var next = _.random(Group.models);
 				var me = this;
-				var delay = 3000;
 				if(next) {
 					_.debounce(function() {
 						var article = App.analyzeArticle(next.id);
 						article.bind('done', me.analyzeNext, me);
-					}, delay)();
+					}, GROUP_DELAY)();
 				}
 			},
 			analyzeGroup: function(input) {

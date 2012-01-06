@@ -156,6 +156,7 @@ define(["jquery", "underscore" ], function($, _) {
 		return [new Date(year, 0, 1), new Date(year, 11, 31)];
 	};
 
+	var lastPattern;
 	function parse(text) {
 		var match, re, dates;
 		_.each(patterns, function(converter, pattern) {
@@ -165,6 +166,7 @@ define(["jquery", "underscore" ], function($, _) {
 					//console.log(re, match);
 					match = _.compact(_.difference(match, ords));
 					dates = converter(match);
+					lastPattern = pattern;
 				}
 			}
 		});
@@ -176,7 +178,7 @@ define(["jquery", "underscore" ], function($, _) {
 		var dates = Array.prototype.slice.call(arguments, 1);
 		console.assert(parsed.length == dates.length);
 		_.each(_.zip(parsed, dates), function(item) {
-			console.assert(item[0].getTime() == item[1].getTime(), text);
+			console.assert(item[0].getTime() == item[1].getTime(), text, lastPattern);
 		});
 	}
 
