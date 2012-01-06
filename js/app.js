@@ -1204,9 +1204,12 @@ define(["jquery",
 				}
 				var next = _.random(Group.models);
 				var me = this;
+				var delay = 3000;
 				if(next) {
-					var article = App.analyzeArticle(next.id);
-					article.bind('done', me.analyzeNext, me);
+					_.debounce(function() {
+						var article = App.analyzeArticle(next.id);
+						article.bind('done', me.analyzeNext, me);
+					}, delay)();
 				}
 			},
 			analyzeGroup: function(input) {
