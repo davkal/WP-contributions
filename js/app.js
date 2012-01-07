@@ -321,7 +321,7 @@ define(["jquery",
 				if(!this.isMain()) {
 					url += "&prop=text";
 				}
-				App.status("Getting HTML for  {0}...".format(this.get('title') || this.get('pageid')));
+				App.status("HTML for  {0}...".format(this.get('title') || this.get('pageid')));
 				$.getJSON(url, function(res){
 					if(res.error) {
 						me.trigger('done');
@@ -460,15 +460,36 @@ define(["jquery",
 				}
 			},
 			h1: function() {
-				// TODO disregard when end? was before article was created
-				var start = this.get('start');
-				if(start) {
-					var created = this.get('revisions').at(0).get('timestamp');
-					var diff = new Date(created) - new Date(start);
-					var days = diff / 1000 / 60 / 60 / 24;
-					return "{0} ({1})".format(days < 3 ? 'True' : 'False', days.toFixed(1));
+				var r = this.get('results') || this.results();
+				return r && r.delta ? "{0} ({1})".format(r.delta < 3 ? 'True' : 'False', r.delta.toFixed(1)) : "Unknown (no start date).";
+			},
+			results: function() {
+				if(!this.has('start') || !this.has('location')) {
+					return;
 				}
-				return "Unknown (no start date).";
+				var r = {};
+				// H1,H2 creation date 
+				r.created = new Date(this.get('revisions').at(0).get('timestamp'));
+				r.start = this.get('start');
+				// H1,H2 timedelta created - started
+				r.delta = (r.created - r.start) / 1000 / 60 / 60 / 24; // in days
+				// TODO H3 first language
+				// TODO H4 distance of creator
+				// TODO H4,H5,H6,H10 mean distance of authors
+				// TODO H5 date range "beginning" 3 days
+				// TODO H5 anon count beginning
+				// TODO H5 registered count beginning
+				// TODO H6 local count (dist < mean) during event
+				// TODO H6 distant count (dist < mean) during event
+				// TODO H7 size of all revs after end
+				// TODO H8 anon count after end
+				// TODO H8 registered count after end
+				// TODO H9 [ts, SD(all)] for all revs after end 
+				// TODO H10 for all revs during count local and distant survivors
+				// TODO H11 [ts, SD(survivor)] for all revs after end 
+
+				// TODO disregard when end? was before article was created
+				return r;
 			}
 		});
 
@@ -531,30 +552,11 @@ define(["jquery",
 			}
 		});
 
-		window.Result = Model.extend({
-			// TODO H1,H2 creation date 
-			// TODO H1,H2 timedelta created - started
-			// TODO H3 first language
-			// TODO H4 distance of creator
-			// TODO H4,H5,H6,H10 mean distance of authors
-			// TODO H5 date range "beginning" 3 days
-			// TODO H5 anon count beginning
-			// TODO H5 registered count beginning
-			// TODO H6 local count (dist < mean) during event
-			// TODO H6 distant count (dist < mean) during event
-			// TODO H7 size of all revs after end
-			// TODO H8 anon count after end
-			// TODO H8 registered count after end
-			// TODO H9 [ts, SD(all)] for all revs after end 
-			// TODO H10 for all revs during count local and distant survivors
-			// TODO H11 [ts, SD(survivor)] for all revs after end 
-		});
-
 		window.Revision = Model.extend({
 			fetchAuthors: function() {
 				var me = this;
 				var url = "http://en.collaborativetrust.com/WikiTrust/RemoteAPI?method=wikimarkup&pageid={0}&revid={1}".format(Article.get('pageid'), this.id);
-				App.status("Authors for text in revision {0}...".format(this.id));
+				App.status("Authors present in revision {0}...".format(this.id));
 				$.get(url, function(res){
 					App.status("Parsing wikitext...");
 					var authors = Article.get('authors');
@@ -634,7 +636,7 @@ define(["jquery",
 					next.set({page: userPage});
 					userPage.bind('loaded', this.checkUserPages, this);
 					userPage.bind('country', this.addCountry, this);
-					App.status('Getting user page for {0}...'.format(next.id));
+					App.status('User page {0}...'.format(next.id));
 					userPage.retrieve();
 				} else {
 					this.trigger('done');
@@ -851,9 +853,9 @@ define(["jquery",
 				var article = this.article || Article;
 				if(article.has('count')) {
 					var total = article.get('count');
-					App.status("Getting revisions {0}...".format(this.status(total)));
+					App.status("Revisions {0}...".format(this.status(total)));
 				} else {
-					App.status("Getting revisions for language {0}...".format(article.get('lang')));
+					App.status("Revisions ({0})...".format(article.get('lang')));
 				}
 				var offset = this.offset || "";
 				var identifier = article.has('pageid') ? "pageids=" + article.get('pageid') : "titles=" + encodeURI(article.get('title'));
@@ -1300,6 +1302,7 @@ define(["jquery",
 				this.cache = $('#cache');
 				this.container = $('#content .container');
 				this.nav = $('.topbar ul.nav');
+				this.status();
 			},
 			analyzeNext: function() {
 				var previous = window.Article;
@@ -1312,12 +1315,16 @@ define(["jquery",
 				if(next) {
 					_.debounce(function() {
 						var article = App.analyzeArticle(next.id);
-						article.bind('done', me.analyzeNext, me);
+						article.bind('done', function() {
+							Results.add(article.results());
+							me.analyzeNext();
+						});
 					}, delay)();
 				}
 			},
 			analyzeGroup: function(input) {
 				window.Group = new PageList;
+				window.Results = new Backbone.Collection;
 				Group.bind('loaded', this.analyzeNext, this);
 				App.status("Page list...");
 				Group.fetchPages(input);

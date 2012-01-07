@@ -16,6 +16,16 @@ String.prototype.format = function() {
     return s;
 };
 
+require.config({
+	waitSeconds: 15
+});
+require.onError = function() {
+	if(window.App) {
+		App.error('Missing JS libraries.');
+	}
+	require.prototype.onError.apply(this, arguments);
+}
+
 require(["jquery", 
 		"underscore", 
 		"backbone", 
