@@ -427,6 +427,7 @@ define(["jquery",
 
 				if(App.details) {
 					this.bind('additional', authors.retrieve, authors);
+					this.bind('done', this.results, this);
 
 					authors.bind('loaded', revisions.retrieve, revisions);
 					authors.bind('loaded', this.calcSignatureDistance, this);
@@ -459,21 +460,28 @@ define(["jquery",
 					this.trigger('done');
 				}
 			},
+			// single article hypotheses
 			h1: function() {
 				var r = this.get('results') || this.results();
 				return r && r.delta ? "{0} ({1})".format(r.delta < 3 ? 'True' : 'False', r.delta.toFixed(1)) : "Unknown (no start date).";
 			},
+			h3: function() {
+				var r = this.get('results') || this.results();
+				return r && r.first_lang ? "{0} ({1})".format(r.delta < 3 ? 'True' : 'False', r.delta.toFixed(1)) : "Unknown (no start date).";
+			},
 			results: function() {
-				if(!this.has('start') || !this.has('location')) {
+				if(this.has('results') || !this.has('start') || !this.has('location')) {
 					return;
 				}
 				var r = {};
 				// H1,H2 creation date 
+				// TODO disregard when end? was before article was created
 				r.created = new Date(this.get('revisions').at(0).get('timestamp'));
 				r.start = this.get('start');
 				// H1,H2 timedelta created - started
 				r.delta = (r.created - r.start) / 1000 / 60 / 60 / 24; // in days
-				// TODO H3 first language
+				// H3 first language
+				r.first_lang = this.get('languages').first().get('lang');
 				// TODO H4 distance of creator
 				// TODO H4,H5,H6,H10 mean distance of authors
 				// TODO H5 date range "beginning" 3 days
@@ -488,7 +496,7 @@ define(["jquery",
 				// TODO H10 for all revs during count local and distant survivors
 				// TODO H11 [ts, SD(survivor)] for all revs after end 
 
-				// TODO disregard when end? was before article was created
+				this.set({results: r});
 				return r;
 			}
 		});
@@ -1356,7 +1364,7 @@ define(["jquery",
 					Article.bind('change:location', dv.render, dv);
 					Article.bind('change:location', Countries.distance, Countries);
 					Article.bind('change:sig_dist', mv.render, mv);
-					Article.bind('done', hv.render, hv);
+					Article.bind('change:results', hv.render, hv);
 
 					authors.bind('loaded', av.render, av);
 					authors.bind('loaded', mv.render, mv);
