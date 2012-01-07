@@ -86,6 +86,21 @@ define(["jquery",
 			}
 		});
 
+		/*
+		 * Models
+		 */
+
+		window.Author = Model.extend({
+			defaults: {
+				ip: false
+			},
+			initialize: function() {
+				if(this.id.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)) {
+					this.set({ip: true});
+				}
+			}
+		});
+
 		window.Location = Model.extend({
 			toString: function() {
 				var str = "{0}; {1}".format(this.get('latitude'), this.get('longitude'));
@@ -241,7 +256,6 @@ define(["jquery",
 				}
 			},
 			parseLocation: function($text, $infobox) {
-				// TODO Murder of Selena 
 				// location from template
 				var template, links, csv, tokens, ands = [], candidates = [];
 			   	if(template = this.get('templates').findByType('infobox')) {
@@ -458,57 +472,62 @@ define(["jquery",
 			}
 		});
 
-		// Template:Infobox_military_conflict
-		// Template:Infobox_civil_conflict
-		// Template:Infobox_historical_event
-		// Category:Political_riots
-
-		window.PageList = Collection.extend({
-			model: Page,
-			offset: null,
-			fetchPages: function(title) {
-				// template or category?
-				this.title = title;
-				this.prefix = title.split(':')[0];
-				if(this.prefix != 'Template' && this.prefix != 'Category') {
-					App.error('Not a valid template or category.');
-					return;
-				}
-				var isTemplate = this.prefix == 'Template';
-
-				this.listkey = isTemplate ? "embeddedin" : "categorymembers";
-				this.titlekey = isTemplate ? "eititle" : "cmtitle";
-				this.limitkey = isTemplate ? "eilimit" : "cmlimit";
-				this.namespace = isTemplate ? "einamespace" : "cmnamespace";
-
-				this.retrieve();
-			},
+		window.UserPage = Model.extend({
 			url: function() {
-				var offset = this.offset || "";
-				var url = "http://{0}.wikipedia.org/w/api.php?action=query&list={1}&format=json&{2}={3}&{4}=0&{5}=50&redirects&callback=?{6}".format('en', this.listkey, this.titlekey, this.title, this.namespace, this.limitkey, offset);
-				return url;
+				return url = "http://{0}.wikipedia.org/w/api.php?action=parse&format=json&callback=?&redirects&prop=text%7Clinks&page=User:{1}".format(Article.get('lang'), encodeURI(this.get('title')));
 			},
 			parse: function(res) {
-				var pages = res.query[this.listkey];
-				if(!pages.length) {
-					App.error("Invalid template/category.");
-					return;
-				}
-				_.each(pages, function(p) {
-					p.id = p.pageid;;
-				});
-				if(this.continue && res['query-continue']) {
-					var key = _.first(_.keys(res['query-continue'][this.listkey]));
-					var next = res['query-continue'][this.listkey][key];
-					this.offset = "&{0}={1}".format(key, next);
-					this.page++;
-					App.status("Next template articles ({0})...".format(this.page));
-					_.defer(_.bind(this.retrieve, this));
-				} else {
-					this.offset = null;
+				var attr = {};
+				if(res.parse) {
+					var countries = [], candidate;
+					// TODO use article candidate mechanism
+					// candidate countries
+					_.each(res.parse.links, function(l) {
+						if(candidate = Countries.isCountry(l['*'])) {
+							countries.push(candidate);
+						}
+					})
+
+					if(countries.length) {
+						var text = res.parse.text['*'];
+						var $text = $(text.replace(/<img[^>]+>/ig, "<img>"));
+						var country, re, pattern, context, selector;
+						var patterns = [
+							" comes? from",
+							" am from",
+							"This user is in",
+							" lives? in",
+							" currently living in"
+						];
+						// BEWARE User:Lihaas has multiple hits
+
+						_.each(countries, function(c) {
+							if(!country) {
+								selector = 'a[title="{0}"]'.format(c.id);
+								context = $text.find(selector).closest('div,p,td').text();
+								_.each(patterns, function(p) {
+									if(!country) {
+										re = new RegExp(p);
+										if(re.test(context)) {
+											country = c.id;
+											pattern = p;
+										}
+									}
+								});
+							}
+						});
+
+						attr.countries = countries;
+						if(country) {
+							attr.country = country;
+							attr.context = context;
+							//console.log(this.get('title'), pattern, country);
+							this.trigger('country', this.get('author'), country);
+						}
+					}
 				}
 				App.status();
-				return pages;
+				return attr;
 			}
 		});
 
@@ -535,17 +554,6 @@ define(["jquery",
 			}
 		});
 
-		window.Author = Model.extend({
-			defaults: {
-				ip: false
-			},
-			initialize: function() {
-				if(this.id.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)) {
-					this.set({ip: true});
-				}
-			}
-		});
-
 		window.Template = Model.extend({
 			date: function() {
 				var m;
@@ -564,36 +572,6 @@ define(["jquery",
 				return m && _.map(m.slice(1), function(s) {
 					return s.trim();
 				});
-			}
-		});
-
-		window.Templates = Collection.extend({
-			model: Template,
-			findByType: function(type) {
-				return this.find(function(t) {
-					return t.has('type') && t.get('type').toLowerCase().startsWith(type);
-				});
-			}
-		}, {
-			fromText: function(text) {
-				var altRe = /{{[^]*?({{[^{}]*?}}[^]*?)*}}/g;
-				// abusing jquery html tree selectors
-				var t = "<text>{0}</text>".format(text
-					.replace(/{{/g, "<template>")
-					.replace(/}}/g, "</template>"));
-				var templates = $(t).find('template');
-				templates = _.map(templates, function(temp) {
-					var content = $(temp).text();
-					var stop = content.indexOf("|");
-					var obj = {
-						content: content
-					};
-					if(stop > 0) {
-						obj.type = content.slice(0, stop).trim();
-					}
-					return obj;
-				});
-				return new Templates(templates);
 			}
 		});
 
@@ -711,6 +689,28 @@ define(["jquery",
 			}
 		});
 
+		window.LanguageCollection = Collection.extend({
+			model: Page,
+			fetchNext: function() {
+				var article = this.find(function(a) {
+					return !a.has('revisions');
+				});
+				if(article) {
+					var revisions = new RevisionCollection([], {
+						article: article, 
+						continue: false,
+						limit: 10
+					});
+					revisions.bind('loaded', function() {
+						article.set({revisions: revisions});
+					});
+					revisions.retrieve();
+				} else {
+					this.trigger('done');
+				}
+			}
+		});
+
 		window.LocationCollection = Collection.extend({
 			model: Location
 		});
@@ -763,7 +763,60 @@ define(["jquery",
 				return country;
 			}
 		});
-		window.Countries = new CountryCollection(countries.list);
+
+		// Template:Infobox_military_conflict
+		// Template:Infobox_civil_conflict
+		// Template:Infobox_historical_event
+		// Category:Political_riots
+
+		window.PageList = Collection.extend({
+			model: Page,
+			offset: null,
+			fetchPages: function(title) {
+				// template or category?
+				this.title = title;
+				this.prefix = title.split(':')[0];
+				if(this.prefix != 'Template' && this.prefix != 'Category') {
+					App.error('Not a valid template or category.');
+					return;
+				}
+				var isTemplate = this.prefix == 'Template';
+
+				this.listkey = isTemplate ? "embeddedin" : "categorymembers";
+				this.titlekey = isTemplate ? "eititle" : "cmtitle";
+				this.limitkey = isTemplate ? "eilimit" : "cmlimit";
+				this.namespace = isTemplate ? "einamespace" : "cmnamespace";
+
+				this.retrieve();
+			},
+			url: function() {
+				var offset = this.offset || "";
+				var url = "http://{0}.wikipedia.org/w/api.php?action=query&list={1}&format=json&{2}={3}&{4}=0&{5}=50&redirects&callback=?{6}".format('en', this.listkey, this.titlekey, this.title, this.namespace, this.limitkey, offset);
+				return url;
+			},
+			parse: function(res) {
+				var pages = res.query[this.listkey];
+				if(!pages.length) {
+					App.error("Invalid template/category.");
+					return;
+				}
+				_.each(pages, function(p) {
+					p.id = p.pageid;;
+				});
+				if(this.continue && res['query-continue']) {
+					var key = _.first(_.keys(res['query-continue'][this.listkey]));
+					var next = res['query-continue'][this.listkey][key];
+					this.offset = "&{0}={1}".format(key, next);
+					this.page++;
+					App.status("Next template articles ({0})...".format(this.page));
+					_.defer(_.bind(this.retrieve, this));
+				} else {
+					this.offset = null;
+				}
+				App.status();
+				return pages;
+			}
+		});
 
 		window.RevisionCollection = Collection.extend({
 			model: Revision,
@@ -831,86 +884,41 @@ define(["jquery",
 			}
 		});
 
-		window.LanguageCollection = Collection.extend({
-			model: Page,
-			fetchNext: function() {
-				var article = this.find(function(a) {
-					return !a.has('revisions');
+		window.Templates = Collection.extend({
+			model: Template,
+			findByType: function(type) {
+				return this.find(function(t) {
+					return t.has('type') && t.get('type').toLowerCase().startsWith(type);
 				});
-				if(article) {
-					var revisions = new RevisionCollection([], {
-						article: article, 
-						continue: false,
-						limit: 10
-					});
-					revisions.bind('loaded', function() {
-						article.set({revisions: revisions});
-					});
-					revisions.retrieve();
-				} else {
-					this.trigger('done');
-				}
 			}
-		});
-
-		window.UserPage = Model.extend({
-			url: function() {
-				return url = "http://{0}.wikipedia.org/w/api.php?action=parse&format=json&callback=?&redirects&prop=text%7Clinks&page=User:{1}".format(Article.get('lang'), encodeURI(this.get('title')));
-			},
-			parse: function(res) {
-				var attr = {};
-				if(res.parse) {
-					var countries = [], candidate;
-					// TODO use article candidate mechanism
-					// candidate countries
-					_.each(res.parse.links, function(l) {
-						if(candidate = Countries.isCountry(l['*'])) {
-							countries.push(candidate);
-						}
-					})
-
-					if(countries.length) {
-						var text = res.parse.text['*'];
-						var $text = $(text.replace(/<img[^>]+>/ig, "<img>"));
-						var country, re, pattern, context, selector;
-						var patterns = [
-							" comes? from",
-							" am from",
-							"This user is in",
-							" lives? in",
-							" currently living in"
-						];
-						// BEWARE User:Lihaas has multiple hits
-
-						_.each(countries, function(c) {
-							if(!country) {
-								selector = 'a[title="{0}"]'.format(c.id);
-								context = $text.find(selector).closest('div,p,td').text();
-								_.each(patterns, function(p) {
-									if(!country) {
-										re = new RegExp(p);
-										if(re.test(context)) {
-											country = c.id;
-											pattern = p;
-										}
-									}
-								});
-							}
-						});
-
-						attr.countries = countries;
-						if(country) {
-							attr.country = country;
-							attr.context = context;
-							//console.log(this.get('title'), pattern, country);
-							this.trigger('country', this.get('author'), country);
-						}
+		}, {
+			fromText: function(text) {
+				var altRe = /{{[^]*?({{[^{}]*?}}[^]*?)*}}/g;
+				// abusing jquery html tree selectors
+				var t = "<text>{0}</text>".format(text
+					.replace(/{{/g, "<template>")
+					.replace(/}}/g, "</template>"));
+				var templates = $(t).find('template');
+				templates = _.map(templates, function(temp) {
+					var content = $(temp).text();
+					var stop = content.indexOf("|");
+					var obj = {
+						content: content
+					};
+					if(stop > 0) {
+						obj.type = content.slice(0, stop).trim();
 					}
-				}
-				App.status();
-				return attr;
+					return obj;
+				});
+				return new Templates(templates);
 			}
 		});
+
+		window.Countries = new CountryCollection(countries.list);
+
+		/*
+		 * VIEWS
+		 */
 
 		window.SectionView = Backbone.View.extend({
 			initialize: function() {
@@ -1243,15 +1251,14 @@ define(["jquery",
 			}
 		});
 
-		// TODO implement hypotheses
-		// TODO categories interface
+		// TODO implement hypotheses and results
 
-		// Nice to have
-		// TODO make Locations global for re-use
-		// TODO town in userpages?
-		// TODO include poor mans checkuser
-		// TODO compare localness of other languages
-		// TODO you are where you edit
+		// NICE TO HAVE
+		// make Locations global for re-use
+		// town in userpages?
+		// include poor mans checkuser
+		// compare localness of other languages
+		// you are where you edit
 
 		window.AppView = Backbone.View.extend({
 			el: $("body"),
