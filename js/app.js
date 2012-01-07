@@ -87,7 +87,7 @@ define(["jquery",
 		});
 
 		/*
-		 * Models
+		 * MODELS
 		 */
 
 		window.Author = Model.extend({
@@ -531,6 +531,25 @@ define(["jquery",
 			}
 		});
 
+		window.Result = Model.extend({
+			// TODO H1,H2 creation date 
+			// TODO H1,H2 timedelta created - started
+			// TODO H3 first language
+			// TODO H4 distance of creator
+			// TODO H4,H5,H6,H10 mean distance of authors
+			// TODO H5 date range "beginning" 3 days
+			// TODO H5 anon count beginning
+			// TODO H5 registered count beginning
+			// TODO H6 local count (dist < mean) during event
+			// TODO H6 distant count (dist < mean) during event
+			// TODO H7 size of all revs after end
+			// TODO H8 anon count after end
+			// TODO H8 registered count after end
+			// TODO H9 [ts, SD(all)] for all revs after end 
+			// TODO H10 for all revs during count local and distant survivors
+			// TODO H11 [ts, SD(survivor)] for all revs after end 
+		});
+
 		window.Revision = Model.extend({
 			fetchAuthors: function() {
 				var me = this;
@@ -574,6 +593,10 @@ define(["jquery",
 				});
 			}
 		});
+
+		/*
+		 * COLLECTIONS
+		 */
 
 		window.Authorship = Collection.extend({
 			model: Author,
