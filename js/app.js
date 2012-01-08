@@ -58,6 +58,9 @@ define(["jquery",
 			initialize: function(models, options) {
 				_.extend(this, options || {});
 			},
+			has: function(property) {
+				return this.filter(function(i){return i.has(property)});
+			},
 			status: function(total) {
 				var pages = Math.ceil(total/(this.limit));
 				return "{0}/{1}".format(this.page, pages);
@@ -479,12 +482,12 @@ define(["jquery",
 				var languages = this.get('languages');
 				var title = this.get('title');
 
-				var res = {};
+				var res = {}, grouped, location, author, revision, username;
 
 				// H1,H2 creation date 
 				// TODO disregard when end? was before article was created
-				var rev0 = revisions.at(0);
-				res.created = new Date(rev0.get('timestamp'));
+				revision = revisions.at(0);
+				res.created = new Date(revision.get('timestamp'));
 				res.start = this.get('start');
 
 				// H1,H2 timedelta created - started
@@ -494,11 +497,11 @@ define(["jquery",
 				res.first_lang = languages.first().get('lang');
 
 				// H4 distance of creator
-				var author0 = authors.get(rev0.get('user'));
-				if(author0.has('location')) {
-					res.creator_dist = author0.get('location').get('distance');
+				author = authors.get(revision.get('user'));
+				if(author && author.has('location')) {
+					res.creator_dist = author.get('location').get('distance');
 				} else {
-					console.log("No creator location.", title);
+					console.log("No creator location.", title, revision.get('user'));
 				}
 
 				// H4,H5,H6,H10 mean distance of authors
@@ -513,7 +516,7 @@ define(["jquery",
 				// H5 date range "beginning" 3 days
 				res.beginning = new Date(res.start);
 				res.beginning.setDate(res.beginning.getDate() + 3);
-				var groupedRevs = revisions.groupBy(function(r) {
+				var gr = revisions.groupBy(function(r) {
 					var date = new Date(r.get('timestamp'));
 					if(date < res.start) {
 						return 'before';
@@ -527,32 +530,88 @@ define(["jquery",
 					return 'after';
 				});
 				// beginning is part of during
-				if(groupedRevs.during && groupedRevs.beginning) {
-					groupedRevs.during = _.union(groupedRevs.beginning, groupedRevs.during);
+				if(gr.during && gr.beginning) {
+					gr.during = _.union(gr.beginning, gr.during);
 				}
 
 				// H5 anon/regs count beginning
-				if(groupedRevs.beginning) {
-					var earlyGroups = _.groupBy(groupedRevs.beginning, function(r) {
-						var user = r.get('user');
-						var author;
-						if(author = authors.get('user')) {
+				if(gr.beginning) {
+					grouped = _.groupBy(gr.beginning, function(r) {
+						username = r.get('user');
+						if(author = authors.get(username)) {
 							return author.get('ip') ? 'anon' : 'reg';
 						}
 						return 'bot';
 					});
-					res.early_anon_count = _.size(earlyGroups.anon);
-					res.early_registered_count = _.size(earlyGroups.reg);
+					res.early_anon_count = _.size(grouped.anon);
+					res.early_registered_count = _.size(grouped.reg);
 				}
 
-				// TODO H6 local count (dist < mean) during event
-				// TODO H6 distant count (dist < mean) during event
+				// H6 local/distant count (dist < mean) during event
+				if(gr.during) {
+					grouped = _.groupBy(gr.during, function(r) {
+						username = r.get('user');
+						if(author = authors.get(username)) {
+							if(location = author.get('location')) {
+								return location.get('distance') < res.mean_dist ? 'local' : 'distant';
+							}
+						}
+						return 'nolocation';
+					});
+					res.during_local_count = _.size(grouped.local);
+					res.during_distant_count = _.size(grouped.distant);
+					res.during_no_location_count = _.size(grouped.nolocation);
+				}
+
 				// TODO H7 size of all revs after end
-				// TODO H8 anon count after end
-				// TODO H8 registered count after end
+				
+				// H8 anon/regs count after end
+				if(gr.end) {
+					grouped = _.groupBy(gr.end, function(r) {
+						username = r.get('user');
+						if(author = authors.get(username)) {
+							return author.get('ip') ? 'anon' : 'reg';
+						}
+						return 'bot';
+					});
+					res.after_anon_count = _.size(grouped.anon);
+					res.after_registered_count = _.size(grouped.reg);
+				}
+
 				// TODO H9 [ts, SD(all)] for all revs after end 
-				// TODO H10 for all revs during count local and distant survivors
-				// TODO H11 [ts, SD(survivor)] for all revs after end 
+				// TODO store SD for all for all revisions
+				if(gr.end) {
+					var after_sig_dists = [];
+					_.each(gr.end, function(r) {
+						if(r.has('sig_dist')) {
+							after_sig_dists.push([r.get('timestamp'), r.get('sig_dist')]);
+						}
+					});
+					res.after_sig_dists = after_sig_dists;
+				}
+
+				// TODO call fetchAuthors on all revisions after start
+				// H10 for all revs during count local and distant survivors
+				if(gr.during) {
+					res.during_local_ratios = _.map(gr.during, function(r) {
+						grouped = _.groupBy(r.get('authors'), function(username) {
+							if(author = authors.get(username)) {
+								if(location = author.get('location')) {
+									return location.get('distance') < res.mean_dist ? 'local' : 'distant';
+								}
+							}
+							return 'nolocation';
+						});
+						return [r.get('timestamp'), grouped.local || 0, grouped.distant || 0];
+					});
+				}
+
+				// H11 [ts, SD(survivor)] for all revs after end 
+				if(gr.end) {
+					res.after_sig_dists = _.map(gr.end, function(r) {
+						after_sig_dists.push([r.get('timestamp'), r.get('sig_dist_survivors')]);
+					});
+				}
 
 				App.status();
 				this.set({results: res});
@@ -634,7 +693,7 @@ define(["jquery",
 					}));
 					var sd;
 				   	if(sd = authors.signatureDistance(editors)) {
-						me.set({sig_dist: sd});
+						me.set({sig_dist_survivors: sd});
 					}
 					App.status();
 					me.set({authors: editors});
@@ -1271,8 +1330,8 @@ define(["jquery",
 					this.renderMap(geoCount);
 					this.column(2);
 					this.textarea('Countries ({0})'.format(_.size(geoCount)), geoCount.join('\n'));
-					if(m.has('sig_dist')) {
-						this.display("Signature distance", "{0} km".format(m.get('sig_dist').toFixed(3)));
+					if(m.has('sig_dist_survivors')) {
+						this.display("Signature distance", "{0} km".format(m.get('sig_dist_survivors').toFixed(3)));
 					}
 				}
 				return this;
