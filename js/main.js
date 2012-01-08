@@ -42,6 +42,9 @@ require(["jquery",
 					return list[index];
 				}
 			},
+			sum: function(list) {
+				return _.reduce(list, function(memo, num){ return memo + num }, 0);
+			},
 			extract: function(obj, list) {
 				var ret = {};
 				_.each(obj, function(val, key) {

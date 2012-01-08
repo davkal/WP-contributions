@@ -15,7 +15,7 @@ define(["jquery",
 			console.log(arguments);
 		};
 
-		window.CACHE_LIMIT = 50000; // (bytes, approx.) keep low, big pages are worth the transfer
+		window.CACHE_LIMIT = 100 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
 		window.GROUP_DELAY = 10 * 1000; // (ms) time before analyzing next article
 		window.RE_PARENTHESES = /\([^\)]*\)/g;
 		window.RE_WIKI_LINK = /\[\[[^\]]*\]\]/g;
@@ -473,20 +473,78 @@ define(["jquery",
 				if(this.has('results') || !this.has('start') || !this.has('location')) {
 					return;
 				}
-				var r = {};
+				App.status('Calculating results...');
+				var authors = this.get('authors');
+				var revisions = this.get('revisions');
+				var languages = this.get('languages');
+				var title = this.get('title');
+
+				var res = {};
+
 				// H1,H2 creation date 
 				// TODO disregard when end? was before article was created
-				r.created = new Date(this.get('revisions').at(0).get('timestamp'));
-				r.start = this.get('start');
+				var rev0 = revisions.at(0);
+				res.created = new Date(rev0.get('timestamp'));
+				res.start = this.get('start');
+
 				// H1,H2 timedelta created - started
-				r.delta = (r.created - r.start) / 1000 / 60 / 60 / 24; // in days
+				res.delta = (res.created - res.start) / 1000 / 60 / 60 / 24; // in days
+
 				// H3 first language
-				r.first_lang = this.get('languages').first().get('lang');
-				// TODO H4 distance of creator
-				// TODO H4,H5,H6,H10 mean distance of authors
-				// TODO H5 date range "beginning" 3 days
-				// TODO H5 anon count beginning
-				// TODO H5 registered count beginning
+				res.first_lang = languages.first().get('lang');
+
+				// H4 distance of creator
+				var author0 = authors.get(rev0.get('user'));
+				if(author0.has('location')) {
+					res.creator_dist = author0.get('location').get('distance');
+				} else {
+					console.log("No creator location.", title);
+				}
+
+				// H4,H5,H6,H10 mean distance of authors
+				var locations = _.compact(authors.pluck('location'));
+				if(locations.length) {
+					var dists = _.pluck(locations, 'distance');
+					res.mean_dist = _.sum(dists) / dists.length;
+				} else {
+					console.log("No author locations.", title);
+				}
+
+				// H5 date range "beginning" 3 days
+				res.beginning = new Date(res.start);
+				res.beginning.setDate(res.beginning.getDate() + 3);
+				var groupedRevs = revisions.groupBy(function(r) {
+					var date = new Date(r.get('timestamp'));
+					if(date < res.start) {
+						return 'before';
+					}
+					if(date < res.beginning) {
+						return 'beginning';
+					}
+					if(date < res.end) {
+						return 'during';
+					}
+					return 'after';
+				});
+				// beginning is part of during
+				if(groupedRevs.during && groupedRevs.beginning) {
+					groupedRevs.during = _.union(groupedRevs.beginning, groupedRevs.during);
+				}
+
+				// H5 anon/regs count beginning
+				if(groupedRevs.beginning) {
+					var earlyGroups = _.groupBy(groupedRevs.beginning, function(r) {
+						var user = r.get('user');
+						var author;
+						if(author = authors.get('user')) {
+							return author.get('ip') ? 'anon' : 'reg';
+						}
+						return 'bot';
+					});
+					res.early_anon_count = _.size(earlyGroups.anon);
+					res.early_registered_count = _.size(earlyGroups.reg);
+				}
+
 				// TODO H6 local count (dist < mean) during event
 				// TODO H6 distant count (dist < mean) during event
 				// TODO H7 size of all revs after end
@@ -496,8 +554,9 @@ define(["jquery",
 				// TODO H10 for all revs during count local and distant survivors
 				// TODO H11 [ts, SD(survivor)] for all revs after end 
 
-				this.set({results: r});
-				return r;
+				App.status();
+				this.set({results: res});
+				return res;
 			}
 		});
 
