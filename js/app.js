@@ -441,13 +441,15 @@ define(["jquery",
 					revisions.bind('loaded', revisions.calcSignatureDistance, revisions);
 
 					current.bind('change:id', current.fetchAuthors, current);
+					current.bind('loaded', revisions.fetchAuthors, revisions);
 
 					languages.bind('reset', languages.fetchNext, languages);
 					languages.bind('change', languages.fetchNext, languages);
 
 					languages.bind('done', function(){this.done('languages')}, this);
 					authors.bind('done', function(){this.done('authors')}, this);
-					revisions.bind('done', function(){this.done('revisions')}, this);
+					revisions.bind('distancedone', function(){this.done('revisiondistances')}, this);
+					revisions.bind('authorsdone', function(){this.done('revisionauthors')}, this);
 				}
 
 				this.set({
@@ -459,10 +461,10 @@ define(["jquery",
 					bots: bots
 				});
 			},
-			todo: ['languages', 'authors', 'revisions'],
+			todos: ['languages', 'authors', 'revisiondistances', 'revisionauthors'],
 			done: function(todoItem) {
-				this.todo = _.without(this.todo, todoItem);
-				if(!_.size(this.todo)) {
+				this.todos = _.without(this.todos, todoItem);
+				if(!_.size(this.todos)) {
 					this.trigger('done');
 				}
 			},
@@ -684,10 +686,13 @@ define(["jquery",
 		});
 
 		window.Revision = Model.extend({
-			fetchAuthors: function() {
+			fetchAuthors: function(count) {
+				if(this.has('authors')) {
+					return;
+				}
 				var me = this;
 				var url = "http://en.collaborativetrust.com/WikiTrust/RemoteAPI?method=wikimarkup&pageid={0}&revid={1}".format(Article.get('pageid'), this.id);
-				App.status("Authors present in revision {0}...".format(this.id));
+				App.status("Authors present in revision {0}...".format(count || this.id));
 				$.get(url, function(res){
 					App.status("Parsing wikitext...");
 					var authors = Article.get('authors');
@@ -702,6 +707,7 @@ define(["jquery",
 					}
 					App.status();
 					me.set({authors: editors});
+					me.trigger('loaded', me);
 				});
 			}
 		});
@@ -1012,6 +1018,7 @@ define(["jquery",
 					this.page++;
 					_.defer(_.bind(this.retrieve, this));
 				} else {
+					this.page = 0;
 					this.offset = null;
 				}
 				App.status();
@@ -1039,7 +1046,7 @@ define(["jquery",
 					});
 					this.trigger('distance', this);
 					if(caller != this) {
-						this.trigger('done', this);
+						this.trigger('distancedone', this);
 					}
 				}
 			},
@@ -1051,11 +1058,15 @@ define(["jquery",
 			fetchAuthors: function() {
 				var locations = Article.get('locations');
 				var rev = this.find(function(r) {
-					return !r.has('authors') 
-						&& Locations.get(r.get('user'));
+					return !r.has('authors');
 				});
 				if(rev) {
-					rev.fetchAuthors();
+					rev.bind('loaded', this.fetchAuthors, this);
+					this.page++;
+					var progress = "{0}/{1}".format(this.page, this.length);
+					rev.fetchAuthors(progress);
+				} else {
+					this.trigger('authorsdone', this);
 				}
 			},
 			current: function(id) {
@@ -1138,6 +1149,7 @@ define(["jquery",
 				return new cls({el: $(this.form), model: model});
 			},
 			row: function(spans) {
+				console.log("Rendering", this.title);
 				spans = spans || ['span10'];
 				var html = this.header();
 				html += '<div class="row">';
@@ -1398,6 +1410,7 @@ define(["jquery",
 			title: "Localness",
 			render: function() {
 				var revisions = Article.get('revisions').has('sig_dist');
+				// FIXME why is this rendered so often????
 				if(_.size(revisions)) {
 					this.row();
 					var me = this;
