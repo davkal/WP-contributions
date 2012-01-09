@@ -435,8 +435,10 @@ define(["jquery",
 					authors.bind('loaded', revisions.retrieve, revisions);
 					authors.bind('loaded', this.calcSignatureDistance, this);
 					authors.bind('loaded', authors.checkUserPages, authors);
+					authors.bind('done', revisions.calcSignatureDistance, revisions);
 
 					revisions.bind('loaded', revisions.current, revisions);
+					revisions.bind('loaded', revisions.calcSignatureDistance, revisions);
 
 					current.bind('change:id', current.fetchAuthors, current);
 
@@ -445,6 +447,7 @@ define(["jquery",
 
 					languages.bind('done', function(){this.done('languages')}, this);
 					authors.bind('done', function(){this.done('authors')}, this);
+					revisions.bind('done', function(){this.done('revisions')}, this);
 				}
 
 				this.set({
@@ -456,7 +459,7 @@ define(["jquery",
 					bots: bots
 				});
 			},
-			todo: ['languages', 'authors'],
+			todo: ['languages', 'authors', 'revisions'],
 			done: function(todoItem) {
 				this.todo = _.without(this.todo, todoItem);
 				if(!_.size(this.todo)) {
@@ -483,12 +486,23 @@ define(["jquery",
 				var title = this.get('title');
 
 				var res = {}, grouped, location, author, revision, username;
-
-				// H1,H2 creation date 
-				// TODO disregard when end? was before article was created
 				revision = revisions.at(0);
 				res.created = new Date(revision.get('timestamp'));
 				res.start = this.get('start');
+				// TODO disregard when end? was before article was created
+				res.end = this.get('end');
+				// make start,end an open interval
+				res.end.setDate(res.end.getDate() + 1);
+				var gr = revisions.groupBy(function(r) {
+					var date = new Date(r.get('timestamp'));
+					if(date < res.start) {
+						return 'before';
+					}
+					if(date < res.end) {
+						return 'during';
+					}
+					return 'after';
+				});
 
 				// H1,H2 timedelta created - started
 				res.delta = (res.created - res.start) / 1000 / 60 / 60 / 24; // in days
@@ -507,7 +521,7 @@ define(["jquery",
 				// H4,H5,H6,H10 mean distance of authors
 				var locations = _.compact(authors.pluck('location'));
 				if(locations.length) {
-					var dists = _.pluck(locations, 'distance');
+					var dists = _.map(locations, function(l) { return l.get('distance')});
 					res.mean_dist = _.sum(dists) / dists.length;
 				} else {
 					console.log("No author locations.", title);
@@ -516,22 +530,14 @@ define(["jquery",
 				// H5 date range "beginning" 3 days
 				res.beginning = new Date(res.start);
 				res.beginning.setDate(res.beginning.getDate() + 3);
-				var gr = revisions.groupBy(function(r) {
-					var date = new Date(r.get('timestamp'));
-					if(date < res.start) {
-						return 'before';
-					}
-					if(date < res.beginning) {
-						return 'beginning';
-					}
-					if(date < res.end) {
-						return 'during';
-					}
-					return 'after';
-				});
 				// beginning is part of during
-				if(gr.during && gr.beginning) {
-					gr.during = _.union(gr.beginning, gr.during);
+				if(gr.during || gr.after) {
+					var earlies = _.filter(_.compact(_.union(gr.during, gr.after)), function(r) {
+						return new Date(r.get('timestamp')) < res.beginning;
+					});
+					if(earlies.length) {
+						gr.beginning = earlies;
+					}
 				}
 
 				// H5 anon/regs count beginning
@@ -566,8 +572,8 @@ define(["jquery",
 				// TODO H7 size of all revs after end
 				
 				// H8 anon/regs count after end
-				if(gr.end) {
-					grouped = _.groupBy(gr.end, function(r) {
+				if(gr.after) {
+					grouped = _.groupBy(gr.after, function(r) {
 						username = r.get('user');
 						if(author = authors.get(username)) {
 							return author.get('ip') ? 'anon' : 'reg';
@@ -578,11 +584,10 @@ define(["jquery",
 					res.after_registered_count = _.size(grouped.reg);
 				}
 
-				// TODO H9 [ts, SD(all)] for all revs after end 
-				// TODO store SD for all for all revisions
-				if(gr.end) {
+				// H9 [ts, SD(all)] for all revs after end 
+				if(gr.after) {
 					var after_sig_dists = [];
-					_.each(gr.end, function(r) {
+					_.each(gr.after, function(r) {
 						if(r.has('sig_dist')) {
 							after_sig_dists.push([r.get('timestamp'), r.get('sig_dist')]);
 						}
@@ -607,8 +612,8 @@ define(["jquery",
 				}
 
 				// H11 [ts, SD(survivor)] for all revs after end 
-				if(gr.end) {
-					res.after_sig_dists = _.map(gr.end, function(r) {
+				if(gr.after) {
+					res.after_sig_dists = _.map(gr.after, function(r) {
 						after_sig_dists.push([r.get('timestamp'), r.get('sig_dist_survivors')]);
 					});
 				}
@@ -765,7 +770,7 @@ define(["jquery",
 					App.status('User page {0}...'.format(next.id));
 					userPage.retrieve();
 				} else {
-					this.trigger('done');
+					this.trigger('done', this);
 				}
 			},
 			url: function() {
@@ -1011,6 +1016,32 @@ define(["jquery",
 				}
 				App.status();
 				return page.revisions;
+			},
+			calcSignatureDistance: function(caller) {
+				if(Article.has('location')) {
+					var authors = Article.get('authors');
+					var located = this.filter(function(rev) {
+						var author = authors.get(rev.get('user'));
+						return author && author.has('location');
+					});
+					var sd, dist;
+					// incremental signature distance
+					var localness = _.memoize(function(i, list) {
+						dist = authors.get(list[i].get('user')).get('location').get('distance');
+						if(i == 0) {
+							return dist;
+						}
+						return (dist + (i- 1) * localness(i - 1, list)) / i;
+					});
+					_.each(located, function(rev, index) {
+						sd = localness(index, located);
+						rev.set({sig_dist: sd});
+					});
+					this.trigger('distance', this);
+					if(caller != this) {
+						this.trigger('done', this);
+					}
+				}
 			},
 			forUser: function(user) {
 				return this.filter(function(rev) {
@@ -1366,29 +1397,12 @@ define(["jquery",
 		window.LocalnessView = TimeLineChartView.extend({
 			title: "Localness",
 			render: function() {
-				var revisions = Article.get('revisions');
-				if(_.size(revisions) && Article.has('location')) {
-					App.status("Calculating localness (ca. {0} sec.)...".format(_.size(revisions) >> 8));
+				var revisions = Article.get('revisions').has('sig_dist');
+				if(_.size(revisions)) {
 					this.row();
 					var me = this;
-					var rows = [];
-					var authors = Article.get('authors');
-					var located = revisions.filter(function(rev) {
-						var author = authors.get(rev.get('user'));
-						return author && author.has('location');
-					});
-					var sd, dist;
-					// incremental signature distance
-					var localness = _.memoize(function(i, list) {
-						dist = authors.get(list[i].get('user')).get('location').get('distance');
-						if(i == 0) {
-							return dist;
-						}
-						return (dist + (i- 1) * localness(i - 1, list)) / i;
-					});
-					_.each(located, function(rev, index) {
-						sd = localness(index, located);
-						rows.push([new Date(rev.get('timestamp')), sd, "" + rev.id]);
+					var rows = _.map(revisions, function(rev, index) {
+						return [new Date(rev.get('timestamp')), rev.get('sig_dist'), "" + rev.id];
 					});
 					var onSelect = function(){
 						var sel = me.chart.getSelection()[0];
@@ -1396,7 +1410,6 @@ define(["jquery",
 						revisions.current(revid);
 					};
 					this.renderTable(rows, onSelect);
-					App.status();
 				}
 				return this;
 			}
@@ -1479,7 +1492,6 @@ define(["jquery",
 					var dv = new LocalnessView();
 					var hv = new HypothesesView();
 
-					Article.bind('change:location', dv.render, dv);
 					Article.bind('change:location', Countries.distance, Countries);
 					Article.bind('change:sig_dist', mv.render, mv);
 					Article.bind('change:results', hv.render, hv);
@@ -1490,7 +1502,7 @@ define(["jquery",
 					authors.bind('userpages', sv.render, sv);
 					authors.bind('userpages', dv.render, dv);
 
-					revisions.bind('loaded', dv.render, dv);
+					revisions.bind('distance', dv.render, dv);
 
 					current.bind('change:authors', sv.render, sv);
 				}
