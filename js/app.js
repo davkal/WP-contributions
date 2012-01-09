@@ -1433,10 +1433,12 @@ define(["jquery",
 				this.table = new google.visualization.DataTable();
 				this.table.addColumn('date', 'Date');
 				this.table.addColumn('number', 'Sd(km)');
+				// TODO add username
 				this.table.addColumn({type: 'string', role: 'annotationText'});
 				if(rows) {
 					this.table.addRows(rows);
 				}
+				// TODO make timeline uniform
 				this.chart = new google.visualization.LineChart(this.div(_.uniqueId("lineChart")));
 				if(onSelect) {
 					google.visualization.events.addListener(this.chart, 'select', onSelect);
@@ -1449,7 +1451,6 @@ define(["jquery",
 			title: "Localness",
 			render: function() {
 				var revisions = Article.get('revisions').has('sig_dist');
-				// FIXME why is this rendered so often????
 				if(_.size(revisions)) {
 					this.row();
 					var me = this;
@@ -1467,7 +1468,7 @@ define(["jquery",
 			}
 		});
 
-		// TODO implement hypotheses and results
+		// TODO GroupResultsView
 
 		// NICE TO HAVE
 		// make Locations global for re-use
