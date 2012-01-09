@@ -16,7 +16,7 @@ define(["jquery",
 		};
 
 		window.CACHE_LIMIT = 100 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
-		window.GROUP_DELAY = 10 * 1000; // (ms) time before analyzing next article
+		window.GROUP_DELAY = 5 * 1000; // (ms) time before analyzing next article
 		window.RE_PARENTHESES = /\([^\)]*\)/g;
 		window.RE_WIKI_LINK = /\[\[[^\]]*\]\]/g;
 
@@ -381,7 +381,7 @@ define(["jquery",
 					App.status();
 					me.set(attr);
 					// short circuit if this is used as helper page
-					var signal = App.details && me.isMain() ? 'additional' : 'done';
+					var signal = me.isMain() ? 'additional' : 'done';
 					if(locationCandidates) {
 						//console.log("Trying location candidates", locationCandidates.slice(0));
 						Location.fromArticle(locationCandidates, me, signal);
@@ -427,29 +427,33 @@ define(["jquery",
 
 				this.bind('change:input', this.retrieve, this); 
 				this.bind('change:pageid', this.fetchAdditionalData, this); 
+				this.bind('additional', authors.retrieve, authors);
+				this.bind('done', this.results, this);
+
+				authors.bind('loaded', revisions.retrieve, revisions);
+				authors.bind('loaded', this.calcSignatureDistance, this);
+				authors.bind('done', revisions.calcSignatureDistance, revisions);
+
+				revisions.bind('loaded', revisions.calcSignatureDistance, revisions);
+
+				languages.bind('reset', languages.fetchNext, languages);
+				languages.bind('change', languages.fetchNext, languages);
+				languages.bind('done', function(){this.done('languages')}, this);
+
+				authors.bind('done', function(){this.done('authors')}, this);
+				revisions.bind('distancedone', function(){this.done('revisiondistances')}, this);
+				revisions.bind('authorsdone', function(){this.done('revisionauthors')}, this);
 
 				if(App.details) {
-					this.bind('additional', authors.retrieve, authors);
-					this.bind('done', this.results, this);
-
-					authors.bind('loaded', revisions.retrieve, revisions);
-					authors.bind('loaded', this.calcSignatureDistance, this);
 					authors.bind('loaded', authors.checkUserPages, authors);
-					authors.bind('done', revisions.calcSignatureDistance, revisions);
-
 					revisions.bind('loaded', revisions.current, revisions);
-					revisions.bind('loaded', revisions.calcSignatureDistance, revisions);
-
 					current.bind('change:id', current.fetchAuthors, current);
-					current.bind('loaded', revisions.fetchAuthors, revisions);
-
-					languages.bind('reset', languages.fetchNext, languages);
-					languages.bind('change', languages.fetchNext, languages);
-
-					languages.bind('done', function(){this.done('languages')}, this);
-					authors.bind('done', function(){this.done('authors')}, this);
-					revisions.bind('distancedone', function(){this.done('revisiondistances')}, this);
-					revisions.bind('authorsdone', function(){this.done('revisionauthors')}, this);
+					// trigger to load authors for all remaining revisions
+					current.bind('authors', revisions.fetchAuthors, revisions);
+				} else {
+					// trigger mock events to short circuit 
+					authors.bind('loaded', function() {this.trigger('done');}, authors);
+					revisions.bind('loaded', function() {this.trigger('authorsdone');}, revisions);
 				}
 
 				this.set({
@@ -477,9 +481,16 @@ define(["jquery",
 				var r = this.get('results') || this.results();
 				return r && r.first_lang ? "{0} ({1})".format(r.delta < 3 ? 'True' : 'False', r.delta.toFixed(1)) : "Unknown (no start date).";
 			},
+			relevant: function() {
+				if(!this.has('location') || !this.has('start') || this.get('start').getFullYear() < 1900) {
+					return false;
+				}
+				return true;
+			},
 			results: function() {
-				if(this.has('results') || !this.has('start') || !this.has('location')) {
-					return;
+				if(this.has('results') || !this.relevant()) {
+					this.trigger('complete');
+					return this.get('results') || null;
 				}
 				App.status('Calculating results...');
 				var authors = this.get('authors');
@@ -488,6 +499,7 @@ define(["jquery",
 				var title = this.get('title');
 
 				var res = {}, grouped, location, author, revision, username;
+				res.title = res.id = title;
 				revision = revisions.at(0);
 				res.created = new Date(revision.get('timestamp'));
 				res.start = this.get('start');
@@ -571,7 +583,12 @@ define(["jquery",
 					res.during_no_location_count = _.size(grouped.nolocation);
 				}
 
-				// TODO H7 size of all revs after end
+				// H7 size of all revs after end
+				if(gr.after) {
+					res.after_text_lengths = _.map(gr.after, function(r) {
+						return [r.get('timestamp'), r.get('length')];
+					});
+				}
 				
 				// H8 anon/regs count after end
 				if(gr.after) {
@@ -597,7 +614,6 @@ define(["jquery",
 					res.after_sig_dists = after_sig_dists;
 				}
 
-				// TODO call fetchAuthors on all revisions after start
 				// H10 for all revs during count local and distant survivors
 				if(gr.during) {
 					res.during_local_ratios = _.map(gr.during, function(r) {
@@ -615,13 +631,14 @@ define(["jquery",
 
 				// H11 [ts, SD(survivor)] for all revs after end 
 				if(gr.after) {
-					res.after_sig_dists = _.map(gr.after, function(r) {
-						after_sig_dists.push([r.get('timestamp'), r.get('sig_dist_survivors')]);
+					res.after_sig_dists_survivors = _.map(gr.after, function(r) {
+						return [r.get('timestamp'), r.get('sig_dist_survivors')];
 					});
 				}
 
 				App.status();
 				this.set({results: res});
+				this.trigger('complete');
 				return res;
 			}
 		});
@@ -635,6 +652,8 @@ define(["jquery",
 				if(res.parse) {
 					var countries = [], candidate;
 					// TODO use article candidate mechanism
+					// TODO load first revisions and check anon comments for "IP"  (e.g. User:TimBentley)
+					// TODO or sequence (anon -> user) with comment "oops this is my IP" (e.g. User:Master%26Expert)
 					// candidate countries
 					_.each(res.parse.links, function(l) {
 						if(candidate = Countries.isCountry(l['*'])) {
@@ -649,6 +668,7 @@ define(["jquery",
 						var patterns = [
 							" comes? from",
 							" am from",
+							"This user is from",
 							"This user is in",
 							" lives? in",
 							" currently living in"
@@ -686,29 +706,37 @@ define(["jquery",
 		});
 
 		window.Revision = Model.extend({
-			fetchAuthors: function(count) {
+			fetchAuthors: function(count, error) {
 				if(this.has('authors')) {
 					return;
 				}
 				var me = this;
 				var url = "http://en.collaborativetrust.com/WikiTrust/RemoteAPI?method=wikimarkup&pageid={0}&revid={1}".format(Article.get('pageid'), this.id);
-				App.status("Authors present in revision {0}...".format(count || this.id));
-				$.get(url, function(res){
+				App.status("Authors present in revision {0}...".format(_.isString(count) && count || this.id));
+				var parse = function(res){
 					App.status("Parsing wikitext...");
-					var authors = Article.get('authors');
+					var text = $(res.responseText).text().trim();
 					var pattern = /{{#t:[^{}]*}}/gm;
-					var tokens = res.responseText.match(pattern);
+					var tokens = text.match(pattern);
+					text = text.replace(pattern, "").replace(/W[\d\.]*, /, "");
+					me.set({length: text.length});
 					var editors = _.uniq(_.map(tokens, function(token) {
 						return token.replace("{{", "").replace("}}", "").split(",")[2];
 					}));
+					var authors = Article.get('authors');
 					var sd;
 				   	if(sd = authors.signatureDistance(editors)) {
 						me.set({sig_dist_survivors: sd});
 					}
 					App.status();
 					me.set({authors: editors});
-					me.trigger('loaded', me);
-				});
+					me.trigger('authors', me);
+				};
+				var options = {success: parse, url: url, type: 'get'};
+				if(error) {
+					options.error = error;
+				}
+				$.ajax(options);
 			}
 		});
 
@@ -930,6 +958,7 @@ define(["jquery",
 		// Template:Infobox_civil_conflict
 		// Template:Infobox_historical_event
 		// Category:Political_riots
+		// Category:2011_riots
 
 		window.PageList = Collection.extend({
 			model: Page,
@@ -1061,10 +1090,20 @@ define(["jquery",
 					return !r.has('authors');
 				});
 				if(rev) {
-					rev.bind('loaded', this.fetchAuthors, this);
-					this.page++;
-					var progress = "{0}/{1}".format(this.page, this.length);
-					rev.fetchAuthors(progress);
+					var me = this;
+					var onError = function(e) {
+						console.error(e);
+						me.page--;
+						// try again if yahoo strikes
+						me.fetchAuthors();
+
+					};
+					_.debounce(function() {
+						rev.bind('authors', me.fetchAuthors, me);
+						me.page++;
+						var progress = "{0}/{1}".format(me.page, me.length);
+						rev.fetchAuthors(progress, onError);
+					}, 800)();
 				} else {
 					this.trigger('authorsdone', this);
 				}
@@ -1149,7 +1188,7 @@ define(["jquery",
 				return new cls({el: $(this.form), model: model});
 			},
 			row: function(spans) {
-				console.log("Rendering", this.title);
+				//console.log("Rendering", this.title);
 				spans = spans || ['span10'];
 				var html = this.header();
 				html += '<div class="row">';
@@ -1456,22 +1495,30 @@ define(["jquery",
 				this.nav = $('.topbar ul.nav');
 				this.status();
 			},
-			analyzeNext: function() {
+			analyzeNext: function(todo) {
+				todo = todo || _.shuffle(Group.pluck('id'));
 				var previous = window.Article;
 				if(previous) {
 					console.log(previous.toString());
 				}
 				var delay = previous ? GROUP_DELAY : 0;
-				var next = _.random(Group.models);
+				var next = todo.pop();
+				// TODO cache results
+				// TODO skip articles where results are present
 				var me = this;
 				if(next) {
 					_.debounce(function() {
-						var article = App.analyzeArticle(next.id);
-						article.bind('done', function() {
-							Results.add(article.results());
-							me.analyzeNext();
+						var article = App.analyzeArticle(next);
+						article.bind('complete', function() {
+							var results = article.get('results');
+							if(results) {
+								Results.add(results);
+							}
+							me.analyzeNext(todo);
 						});
 					}, delay)();
+				} else {
+					console.log("Group analysis complete.");
 				}
 			},
 			analyzeGroup: function(input) {
@@ -1487,16 +1534,18 @@ define(["jquery",
 				}
 
 				window.Article = new MainArticle;
+				var authors = Article.get('authors');
 
 				var av = new Overview();
 				var pv = new PropertiesView();
 
 				Article.bind('change:pageid', av.render, av);
 				Article.bind('change:location', pv.render, pv);
+				Article.bind('change:location', Countries.distance, Countries);
 				Article.bind('found', av.render, av);
+				authors.bind('loaded', av.render, av);
 
 				if(this.details && google.visualization) {
-					var authors = Article.get('authors');
 					var revisions = Article.get('revisions');
 					var current = Article.get('current');
 
@@ -1505,15 +1554,13 @@ define(["jquery",
 					var dv = new LocalnessView();
 					var hv = new HypothesesView();
 
-					Article.bind('change:location', Countries.distance, Countries);
 					Article.bind('change:sig_dist', mv.render, mv);
 					Article.bind('change:results', hv.render, hv);
 
-					authors.bind('loaded', av.render, av);
 					authors.bind('loaded', mv.render, mv);
-					authors.bind('userpages', mv.render, mv);
-					authors.bind('userpages', sv.render, sv);
-					authors.bind('userpages', dv.render, dv);
+					authors.bind('done', mv.render, mv);
+					authors.bind('done', sv.render, sv);
+					authors.bind('done', dv.render, dv);
 
 					revisions.bind('distance', dv.render, dv);
 
