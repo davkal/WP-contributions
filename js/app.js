@@ -26,16 +26,16 @@ define(["jquery",
 			var sum_yy = 0;
 			var x, y;
 
-			for (var i = 0; i < n; i++) {
-				x = values[i][0];
-				y = values[i][1];
+			_.each(values, function(v) {
+				x = (new Date(v[0])).getTime();
+				y = parseInt(v[1]);
 
 				sum_x += x;
 				sum_y += y;
 				sum_xy += (x*y);
 				sum_xx += (x*x);
 				sum_yy += (y*y);
-			} 
+			}); 
 
 			lr['slope'] = (n * sum_xy - sum_x * sum_y) / (n*sum_xx - sum_x * sum_x);
 			//lr['intercept'] = (sum_y - lr.slope * sum_x)/n;
@@ -631,7 +631,9 @@ define(["jquery",
 							after_sig_dists.push([r.get('timestamp'), r.get('sig_dist')]);
 						}
 					});
-					res.after_sig_dists = after_sig_dists;
+					if(after_sig_dists.length) {
+						res.after_sig_dists = after_sig_dists;
+					}
 				}
 
 				// H10 for all revs during count local and distant survivors
@@ -1352,10 +1354,7 @@ define(["jquery",
 				if(_.isUndefined(r.after_text_lengths)) {
 					return "n/a (no revisions after event)."
 				}
-				var values = _.map(r.after_text_lengths, function(v) {
-					return [new Date(v[0]).getTime(), parseInt(v[1])];
-				});
-				var lr = linearRegression(values);
+				var lr = linearRegression(r.after_text_lengths);
 				return "{0} (R<sup>2</sup>: {1}, slope: {2})".format(lr.r2 < 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2));
 			},
 			h8: function(r) {
@@ -1365,16 +1364,28 @@ define(["jquery",
 				return "{0} ({1} registered, {2} anonymous)".format(r.after_registered_count > r.after_anon_count ? 'True' : 'False', r.after_registered_count, r.after_anon_count);
 			},
 			h9: function(r) {
-				// TODO derive incline
-				return "Not implemented"
+				if(_.isUndefined(r.after_sig_dists)) {
+					return "n/a (no located revisions after event)."
+				}
+				var lr = linearRegression(r.after_sig_dists);
+				return "{0} (R<sup>2</sup>: {1}, slope: {2})".format(lr.r2 > 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2));
 			},
 			h10: function(r) {
-				// TODO columns pos/neg
-				return "Not implemented"
+				if(_.isUndefined(r.during_local_ratios)) {
+					return "n/a (no located revisions during event)."
+				}
+				var moreLocals = 0;
+				_.each(r.during_local_ratios, function(arr) {
+					moreLocals +=  arr[1] > arr[2] ? 1 : 0;
+				});
+				return "{0} ({1}/{2} revisions with more locals)".format(r.during_local_ratios.length == moreLocals ? 'True' : 'False', moreLocals, r.during_local_ratios.length);
 			},
 			h11: function(r) {
-				// TODO derive incline
-				return "Not implemented"
+				if(_.isUndefined(r.after_sig_dists_survivors)) {
+					return "n/a (no located revisions after event)."
+				}
+				var lr = linearRegression(r.after_sig_dists_survivors);
+				return "{0} (R<sup>2</sup>: {1}, slope: {2})".format(lr.r2 > 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2));
 			},
 			render: function() {
 				var r = Article.get('results');
@@ -1384,13 +1395,16 @@ define(["jquery",
 					return this;
 				}
 				// single article hypotheses
-				this.display('Article was created in the first 3 days', this.h1(r));
-				this.display('First article was created in English', this.h3(r));
-				this.display('Creator distance was less than mean distance', this.h4(r));
-				this.display('Most of early contributors were anonymous', this.h5(r));
-				this.display('Most of contributions during the event had distance less than mean', this.h6(r));
-				this.display('Revisions are getting smaller in length after event', this.h7(r));
-				this.display('Most late contributors were registered users', this.h8(r));
+				this.display('1. Article was created in the first 3 days', this.h1(r));
+				this.display('3. First article was created in English', this.h3(r));
+				this.display('4. Creator distance was less than mean distance', this.h4(r));
+				this.display('5. Most of early contributors were anonymous', this.h5(r));
+				this.display('6. Most of contributions during the event had distance less than mean', this.h6(r));
+				this.display('7. Revisions are getting smaller in length after event', this.h7(r));
+				this.display('8. Most late contributors were registered users', this.h8(r));
+				this.display('9. Spatial distribution less local after event', this.h9(r));
+				this.display('10. Text consists of more local contributions during event', this.h10(r));
+				this.display('11. Spatial distribution of surviving contribution becomes less local', this.h11(r));
 				return this;
 			}
 		});
