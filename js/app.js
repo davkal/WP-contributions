@@ -647,7 +647,7 @@ define(["jquery",
 							}
 							return 'nolocation';
 						});
-						return [r.get('timestamp'), grouped.local || 0, grouped.distant || 0];
+						return [r.get('timestamp'), _.size(grouped.local) || 0, _.size(grouped.distant) || 0, _.size(grouped.nolocation) || 0];
 					});
 				}
 
@@ -1178,12 +1178,18 @@ define(["jquery",
 
 		window.SectionView = Backbone.View.extend({
 			initialize: function() {
-				this.id = this.id || this.title.toLowerCase();
-				this.el = $('#' + this.id);
+				if(this.id || this.title) {
+					this.id = this.id || this.title && this.title.toLowerCase();
+					this.el = $('#' + this.id);
+				}
 			},
 			div: function(id) {
 				var el = this.make('div', {id: id});
-				this.body.append(el);
+				if(this.body) {
+					this.body.append(el);
+				} else {
+					this.el.append(el);
+				}
 				return el;
 			},
 			display: function(label, value) {
@@ -1205,11 +1211,15 @@ define(["jquery",
 				return '<div class="page-header"><h1>{0} <small>{1}</small></h1></div>'.format(this.title, this.subtitle || "");
 			},
 			column: function(n) {
-				this.body = this.$('.row div:nth-child({0})'.format(n));
+				this.body = this.$('.row > div:nth-child({0})'.format(n));
 				this.form = $('form', this.body);
 			},
 			subview: function(cls, model) {
-				return new cls({el: $(this.form), model: model});
+				if(model) {
+					return new cls({el: $(this.form), model: model});
+				} else {
+					return new cls({el: this.body});
+				}
 			},
 			row: function(spans) {
 				//console.log("Rendering", this.title);
@@ -1399,6 +1409,7 @@ define(["jquery",
 				// single article hypotheses
 				this.display('1. Article was created in the first 3 days', this.h1(r));
 				// H2 relates to a group of articles
+				this.display('2. Recent articles are created sooner', "n/a (single article).");
 				this.display('3. First article was created in English', this.h3(r));
 				this.display('4. Creator distance was less than mean distance', this.h4(r));
 				this.display('5. Most of early contributors were anonymous', this.h5(r));
@@ -1410,11 +1421,41 @@ define(["jquery",
 				this.display('11. Spatial distribution of surviving contribution becomes less local', this.h11(r));
 
 				this.column(2);
+				var cols, chart;
 
-				// TODO H7 article length chart
-				// TODO H9 sig dists after event chart
-				// TODO H10 local vs distant column chart
-				// TODO H11 sig dists survivors after chart
+				// H7 article length chart
+				chart = this.subview(TimeLineChartView);
+				cols = [
+					{label: 'Date', type: 'date'},
+					{label: 'Length', type: 'number'}
+				];
+				chart.renderTable(cols, r.after_text_lengths, null, 600, "Text lengths after event");
+
+				// H9 sig dists after event chart
+				chart = this.subview(TimeLineChartView);
+				cols = [
+					{label: 'Date', type: 'date'},
+					{label: 'Sd(km)', type: 'number'}
+				];
+				chart.renderTable(cols, r.after_sig_dists, null, 600, "Signature distance after event");
+
+				// H10 local vs distant column chart
+				chart = this.subview(TimeLineChartView);
+				cols = [
+					{label: 'Date', type: 'date'},
+					{label: 'Local', type: 'number'},
+					{label: 'Distant', type: 'number'},
+					{label: 'Unknown', type: 'number'}
+				];
+				chart.renderTable(cols, r.during_local_ratios, null, 600, "Contributor localness of text survival during event");
+
+				// H11 sig dists survivors after chart
+				chart = this.subview(TimeLineChartView);
+				cols = [
+					{label: 'Date', type: 'date'},
+					{label: 'Sd(km)', type: 'number'}
+				];
+				chart.renderTable(cols, r.after_sig_dists_survivors, null, 600, "Signature distance (survivors) after event");
 				
 				return this;
 			}
@@ -1529,29 +1570,36 @@ define(["jquery",
 		});
 
 		window.TimeLineChartView = SectionView.extend({
-			addModel: function(model) {
-				var row;
-			   	if(row = this.prepareRow(model)) {
-					this.table.addRow(row);
-					this.chart.draw(this.table);
-					this.trigger('update');
+			renderTable: function(cols, rows, onSelect, width, title) {
+				width = width || 800;
+				var config = {
+					strictFirstColumnType: true,
+					width: width
+				};
+				if(title) {
+					config.title = title;
 				}
-			},
-			renderTable: function(rows, onSelect) {
-				this.table = new google.visualization.DataTable();
-				this.table.addColumn('date', 'Date');
-				this.table.addColumn('number', 'Sd(km)');
-				// TODO add username
-				this.table.addColumn({type: 'string', role: 'annotationText'});
+				var table = new google.visualization.DataTable();
+				// need to be added one by one 
+				_.each(cols, function(col) {
+					table.addColumn(col);
+				});
 				if(rows) {
-					this.table.addRows(rows);
+					_.each(cols, function(col, index) {
+						if(col.type == 'date') {
+							_.each(rows, function(row) {
+								row[index] = new Date(row[index]);
+							});
+						}
+					});
+					table.addRows(rows);
 				}
-				// TODO make timeline uniform
-				this.chart = new google.visualization.LineChart(this.div(_.uniqueId("lineChart")));
+				var ct = this.div(_.uniqueId("lineChart"));
+				this.chart = new google.visualization.LineChart(ct);
 				if(onSelect) {
 					google.visualization.events.addListener(this.chart, 'select', onSelect);
 				}
-				this.chart.draw(this.table, {width: 800});
+				this.chart.draw(table, config);
 			}
 		});
 
@@ -1562,15 +1610,21 @@ define(["jquery",
 				if(_.size(revisions)) {
 					this.row();
 					var me = this;
+					var cols = [
+						// TODO add username
+						{label: 'Date', type: 'date'},
+						{label: 'Sd(km)', type: 'number'},
+						{type: 'string', role: 'annotationText'}
+					];
 					var rows = _.map(revisions, function(rev, index) {
-						return [new Date(rev.get('timestamp')), rev.get('sig_dist'), "" + rev.id];
+						return [rev.get('timestamp'), rev.get('sig_dist'), "" + rev.id];
 					});
 					var onSelect = function(){
 						var sel = me.chart.getSelection()[0];
 						var revid = me.table.getValue(sel.row, 2);
 						revisions.current(revid);
 					};
-					this.renderTable(rows, onSelect);
+					this.renderTable(cols, rows, onSelect);
 				}
 				return this;
 			}

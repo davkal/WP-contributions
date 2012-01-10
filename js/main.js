@@ -32,6 +32,8 @@ require(["jquery",
 		"app"
 	], function($, _, Backbone, ba, bs, jx, app) {
 
+		window._ = _;
+
 		_.mixin({
 			random: function(list) {
 				if(list.length) {
