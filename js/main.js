@@ -20,10 +20,7 @@ require.config({
 	waitSeconds: 15
 });
 require.onError = function() {
-	if(window.App) {
-		App.error('Missing JS libraries.');
-	}
-	require.prototype.onError.apply(this, arguments);
+	$('#status').text('Missing JS libraries.');
 }
 
 require(["jquery", 

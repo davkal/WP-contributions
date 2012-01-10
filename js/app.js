@@ -472,15 +472,6 @@ define(["jquery",
 					this.trigger('done');
 				}
 			},
-			// single article hypotheses
-			h1: function() {
-				var r = this.get('results') || this.results();
-				return r && r.delta ? "{0} ({1})".format(r.delta < 3 ? 'True' : 'False', r.delta.toFixed(1)) : "Unknown (no start date).";
-			},
-			h3: function() {
-				var r = this.get('results') || this.results();
-				return r && r.first_lang ? "{0} ({1})".format(r.delta < 3 ? 'True' : 'False', r.delta.toFixed(1)) : "Unknown (no start date).";
-			},
 			relevant: function() {
 				if(!this.has('location') || !this.has('start') || this.get('start').getFullYear() < 1900) {
 					return false;
@@ -1304,10 +1295,66 @@ define(["jquery",
 
 		window.HypothesesView = SectionView.extend({
 			title: "Hypotheses",
+			h1: function(r) {
+				return r.delta ? "{0} ({1})".format(r.delta < 3 ? 'True' : 'False', r.delta.toFixed(1)) : "n/a (no start date).";
+			},
+			h3: function(r) {
+				return "{0} ({1})".format(r.first_lang == 'en' ? 'True' : 'False', r.first_lang);
+			},
+			h4: function(r) {
+				if(!_.isUndefined(r.creator_dist)) {
+				   "n/a (no creator location).";
+				}
+		 		return "{0} ({1} km)".format(r.creator_dist <= r.mean_dist ? 'True' : 'False', r.creator_dist.toFixed(1));
+			},
+			h5: function(r) {
+				if(!_.isUndefined(r.early_anon_count)) {
+					return "n/a (no early revisions)."
+				}
+				return "{0} ({1} registered, {2} anonymous)".format(r.early_anon_count > r.early_registered_count ? 'True' : 'False', r.early_registered_count, r.early_anon_count);
+			},
+			h6: function(r) {
+				if(!_.isUndefined(r.during_local_count)) {
+					return "n/a (no revisions during event)."
+				}
+				return "{0} ({1} local, {2} distant, {3} unknown)".format(r.during_local_count > r.during_distant_count ? 'True' : 'False', r.during_local_count, r.during_distant_count, r.during_no_location_count);
+			},
+			h7: function(r) {
+				// TODO derive incline
+				return "Not implemented"
+			},
+			h8: function(r) {
+				if(!_.isUndefined(r.after_anon_count)) {
+					return "n/a (no late revisions)."
+				}
+				return "{0} ({1} registered, {2} anonymous)".format(r.after_registered_count > r.after_anon_count ? 'True' : 'False', r.after_registered_count, r.after_anon_count);
+			},
+			h9: function(r) {
+				// TODO derive incline
+				return "Not implemented"
+			},
+			h10: function(r) {
+				// TODO columns pos/neg
+				return "Not implemented"
+			},
+			h11: function(r) {
+				// TODO derive incline
+				return "Not implemented"
+			},
 			render: function() {
+				var r = Article.get('results');
 				this.row(['span-one-third', 'span-one-third', 'span-one-third']);
-				var m = Article;
-				this.display('Article was created in the first 3 days', m.h1());
+				if(!r) {
+					this.display("Article not relevant", "The article does not contain all necessary properties for an analysis.");
+					return this;
+				}
+				// single article hypotheses
+				this.display('Article was created in the first 3 days', this.h1(r));
+				this.display('First article was created in English', this.h3(r));
+				this.display('Creator distance was less than mean distance', this.h4(r));
+				this.display('Most of early contributors were anonymous', this.h5(r));
+				this.display('Most of contributors had distance less than mean', this.h6(r));
+				this.display('Most late contributors were registered users', this.h8(r));
 				return this;
 			}
 		});
