@@ -660,6 +660,8 @@ define(["jquery",
 
 				App.status();
 				this.set({results: res});
+				// caching results
+				App.setItem(Article.get('input'), res, true);
 				this.trigger('complete');
 				return res;
 			}
@@ -1389,13 +1391,14 @@ define(["jquery",
 			},
 			render: function() {
 				var r = Article.get('results');
-				this.row(['span-one-third', 'span-one-third', 'span-one-third']);
+				this.row(['span-one-third', 'span-two-thirds']);
 				if(!r) {
 					this.display("Article not relevant", "The article does not contain all necessary properties for an analysis.");
 					return this;
 				}
 				// single article hypotheses
 				this.display('1. Article was created in the first 3 days', this.h1(r));
+				// H2 relates to a group of articles
 				this.display('3. First article was created in English', this.h3(r));
 				this.display('4. Creator distance was less than mean distance', this.h4(r));
 				this.display('5. Most of early contributors were anonymous', this.h5(r));
@@ -1405,6 +1408,14 @@ define(["jquery",
 				this.display('9. Spatial distribution less local after event', this.h9(r));
 				this.display('10. Text consists of more local contributions during event', this.h10(r));
 				this.display('11. Spatial distribution of surviving contribution becomes less local', this.h11(r));
+
+				this.column(2);
+
+				// TODO H7 article length chart
+				// TODO H9 sig dists after event chart
+				// TODO H10 local vs distant column chart
+				// TODO H11 sig dists survivors after chart
+				
 				return this;
 			}
 		});
@@ -1601,7 +1612,6 @@ define(["jquery",
 				}
 				var delay = previous ? GROUP_DELAY : 0;
 				var next = todo.pop();
-				// TODO cache results
 				// TODO skip articles where results are present
 				var me = this;
 				if(next) {
@@ -1636,11 +1646,13 @@ define(["jquery",
 
 				var av = new Overview();
 				var pv = new PropertiesView();
+				var hv = new HypothesesView();
 
 				Article.bind('change:pageid', av.render, av);
 				Article.bind('change:location', pv.render, pv);
 				Article.bind('change:location', Countries.distance, Countries);
 				Article.bind('found', av.render, av);
+				Article.bind('change:results', hv.render, hv);
 				authors.bind('loaded', av.render, av);
 
 				if(this.details && google.visualization) {
@@ -1650,10 +1662,8 @@ define(["jquery",
 					var mv = new MapView();
 					var sv = new SurvivorView();
 					var dv = new LocalnessView();
-					var hv = new HypothesesView();
 
 					Article.bind('change:sig_dist', mv.render, mv);
-					Article.bind('change:results', hv.render, hv);
 
 					authors.bind('loaded', mv.render, mv);
 					authors.bind('done', mv.render, mv);
@@ -1665,8 +1675,14 @@ define(["jquery",
 					current.bind('change:authors', sv.render, sv);
 				}
 
-				// kick things off
-				Article.set({input: input});
+				var results = App.getItem(input);
+				if(results) {
+					// showing only results when cached
+					Article.set({results: results});
+				} else {
+					// kick things off
+					Article.set({input: input});
+				}
 				return Article;
 			},
 			status: _.throttle(function(msg) {
@@ -1680,9 +1696,9 @@ define(["jquery",
 			clearCache: function() {
 				localStorage.clear();
 			},
-			setItem: function(key, value) {
+			setItem: function(key, value, nocheck) {
 				value = JSON.stringify(value);
-				if(value.length < CACHE_LIMIT) {
+				if(nocheck || value.length < CACHE_LIMIT) {
 					var s = lz77.compress(value);
 					try { 
 						localStorage.setItem(key, s);
