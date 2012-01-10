@@ -15,6 +15,35 @@ define(["jquery",
 			console.log(arguments);
 		};
 
+		// http://trentrichardson.com/2010/04/06/compute-linear-regressions-in-javascript/
+		function linearRegression(values){
+			var lr = {};
+			var n = values.length;
+			var sum_x = 0;
+			var sum_y = 0;
+			var sum_xy = 0;
+			var sum_xx = 0;
+			var sum_yy = 0;
+			var x, y;
+
+			for (var i = 0; i < n; i++) {
+				x = values[i][0];
+				y = values[i][1];
+
+				sum_x += x;
+				sum_y += y;
+				sum_xy += (x*y);
+				sum_xx += (x*x);
+				sum_yy += (y*y);
+			} 
+
+			lr['slope'] = (n * sum_xy - sum_x * sum_y) / (n*sum_xx - sum_x * sum_x);
+			//lr['intercept'] = (sum_y - lr.slope * sum_x)/n;
+			lr['r2'] = Math.pow((n*sum_xy - sum_x*sum_y)/Math.sqrt((n*sum_xx-sum_x*sum_x)*(n*sum_yy-sum_y*sum_y)),2);
+
+			return lr;
+		}
+
 		window.CACHE_LIMIT = 100 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
 		window.GROUP_DELAY = 5 * 1000; // (ms) time before analyzing next article
 		window.RE_PARENTHESES = /\([^\)]*\)/g;
@@ -1302,29 +1331,35 @@ define(["jquery",
 				return "{0} ({1})".format(r.first_lang == 'en' ? 'True' : 'False', r.first_lang);
 			},
 			h4: function(r) {
-				if(!_.isUndefined(r.creator_dist)) {
+				if(_.isUndefined(r.creator_dist)) {
 				   "n/a (no creator location).";
 				}
 		 		return "{0} ({1} km)".format(r.creator_dist <= r.mean_dist ? 'True' : 'False', r.creator_dist.toFixed(1));
 			},
 			h5: function(r) {
-				if(!_.isUndefined(r.early_anon_count)) {
+				if(_.isUndefined(r.early_anon_count)) {
 					return "n/a (no early revisions)."
 				}
 				return "{0} ({1} registered, {2} anonymous)".format(r.early_anon_count > r.early_registered_count ? 'True' : 'False', r.early_registered_count, r.early_anon_count);
 			},
 			h6: function(r) {
-				if(!_.isUndefined(r.during_local_count)) {
+				if(_.isUndefined(r.during_local_count)) {
 					return "n/a (no revisions during event)."
 				}
 				return "{0} ({1} local, {2} distant, {3} unknown)".format(r.during_local_count > r.during_distant_count ? 'True' : 'False', r.during_local_count, r.during_distant_count, r.during_no_location_count);
 			},
 			h7: function(r) {
-				// TODO derive incline
-				return "Not implemented"
+				if(_.isUndefined(r.after_text_lengths)) {
+					return "n/a (no revisions after event)."
+				}
+				var values = _.map(r.after_text_lengths, function(v) {
+					return [new Date(v[0]).getTime(), parseInt(v[1])];
+				});
+				var lr = linearRegression(values);
+				return "{0} (R<sup>2</sup>: {1}, slope: {2})".format(lr.r2 < 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2));
 			},
 			h8: function(r) {
-				if(!_.isUndefined(r.after_anon_count)) {
+				if(_.isUndefined(r.after_anon_count)) {
 					return "n/a (no late revisions)."
 				}
 				return "{0} ({1} registered, {2} anonymous)".format(r.after_registered_count > r.after_anon_count ? 'True' : 'False', r.after_registered_count, r.after_anon_count);
@@ -1353,7 +1388,8 @@ define(["jquery",
 				this.display('First article was created in English', this.h3(r));
 				this.display('Creator distance was less than mean distance', this.h4(r));
 				this.display('Most of early contributors were anonymous', this.h5(r));
-				this.display('Most of contributors had distance less than mean', this.h6(r));
+				this.display('Most of contributions during the event had distance less than mean', this.h6(r));
+				this.display('Revisions are getting smaller in length after event', this.h7(r));
 				this.display('Most late contributors were registered users', this.h8(r));
 				return this;
 			}
