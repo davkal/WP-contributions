@@ -37,9 +37,12 @@ define(["jquery",
 				sum_yy += (y*y);
 			}); 
 
-			lr['slope'] = (n * sum_xy - sum_x * sum_y) / (n*sum_xx - sum_x * sum_x);
-			//lr['intercept'] = (sum_y - lr.slope * sum_x)/n;
-			lr['r2'] = Math.pow((n*sum_xy - sum_x*sum_y)/Math.sqrt((n*sum_xx-sum_x*sum_x)*(n*sum_yy-sum_y*sum_y)),2);
+			lr.slope = (n * sum_xy - sum_x * sum_y) / (n*sum_xx - sum_x * sum_x);
+			lr.intercept = (sum_y - lr.slope * sum_x)/n;
+			lr.r = (n*sum_xy - sum_x*sum_y)/Math.sqrt((n*sum_xx-sum_x*sum_x)*(n*sum_yy-sum_y*sum_y));
+			lr.r2 = Math.pow(lr.r, 2);
+			lr.df = n - 2;
+			lr.t = lr.r * Math.sqrt(lr.df) / Math.sqrt(1 - lr.r2);
 
 			return lr;
 		}
@@ -605,7 +608,8 @@ define(["jquery",
 
 				// H7 size of all revs after end
 				if(gr.after) {
-					res.after_text_lengths = _.map(gr.after, function(r) {
+					var list = revisions.sample ? _.has(gr.after, 'selected') : gr.after;
+					res.after_text_lengths = _.map(list, function(r) {
 						return [r.get('timestamp'), r.get('length')];
 					});
 				}
@@ -638,7 +642,8 @@ define(["jquery",
 
 				// H10 for all revs during count local and distant survivors
 				if(gr.during) {
-					res.during_local_ratios = _.map(gr.during, function(r) {
+					var list = revisions.sample ? _.has(gr.during, 'selected') : gr.during;
+					res.during_local_ratios = _.map(list, function(r) {
 						grouped = _.groupBy(r.get('authors'), function(username) {
 							if(author = authors.get(username)) {
 								if(location = author.get('location')) {
@@ -647,13 +652,14 @@ define(["jquery",
 							}
 							return 'nolocation';
 						});
-						return [r.get('timestamp'), _.size(grouped.local) || 0, _.size(grouped.distant) || 0, _.size(grouped.nolocation) || 0];
+						return [r.get('timestamp'), _.size(grouped.local) || 0, _.size(grouped.distant) || 0];
 					});
 				}
 
 				// H11 [ts, SD(survivor)] for all revs after end 
 				if(gr.after) {
-					res.after_sig_dists_survivors = _.map(gr.after, function(r) {
+					var list = revisions.sample ? _.has(gr.after, 'selected') : gr.after;
+					res.after_sig_dists_survivors = _.map(list, function(r) {
 						return [r.get('timestamp'), r.get('sig_dist_survivors')];
 					});
 				}
@@ -676,9 +682,8 @@ define(["jquery",
 				if(res.parse) {
 					var countries = [], candidate;
 					// TODO use article candidate mechanism
-					// TODO load first revisions and check anon comments for "IP"  (e.g. User:TimBentley)
-					// TODO or sequence (anon -> user) with comment "oops this is my IP" (e.g. User:Master%26Expert)
-					// candidate countries
+					// TRY load first revisions and check anon comments for "IP"  (e.g. User:TimBentley)
+					// TRY or sequence (anon -> user) with comment "oops this is my IP" (e.g. User:Master%26Expert)
 					_.each(res.parse.links, function(l) {
 						if(candidate = Countries.isCountry(l['*'])) {
 							countries.push(candidate);
@@ -1109,12 +1114,26 @@ define(["jquery",
 				});
 			},
 			fetchAuthors: function() {
-				var locations = Article.get('locations');
+				var max = 25; // n < 2 * max
+				var me = this;
+				if(!this.sample && this.length > max * 2) {
+					// limit to sample for text survival analysis
+					var mod = Math.round(this.length / max);
+					this.each(function(r, i) {
+						if(i % mod == 0) {
+							r.set({selected: true});
+						}
+					});
+					this.sample = _.size(this.has('selected'));
+					console.log("Selected revisions for text analysis", this.sample, this.length);
+				}
 				var rev = this.find(function(r) {
-					return !r.has('authors');
+					// select only sample if population is too big
+					return !r.has('authors') && (!me.sample || r.get('selected'));
 				});
 				if(rev) {
 					var me = this;
+					var count = this.sample || this.length;
 					var onError = function(e) {
 						console.error(e);
 						me.page--;
@@ -1125,7 +1144,7 @@ define(["jquery",
 					_.debounce(function() {
 						rev.bind('authors', me.fetchAuthors, me);
 						me.page++;
-						var progress = "{0}/{1}".format(me.page, me.length);
+						var progress = "{0}/{1}".format(me.page, count);
 						rev.fetchAuthors(progress, onError);
 					}, 800)();
 				} else {
@@ -1346,7 +1365,7 @@ define(["jquery",
 			},
 			h4: function(r) {
 				if(_.isUndefined(r.creator_dist)) {
-				   "n/a (no creator location).";
+				   return "n/a (no creator location).";
 				}
 		 		return "{0} ({1} km)".format(r.creator_dist <= r.mean_dist ? 'True' : 'False', r.creator_dist.toFixed(1));
 			},
@@ -1367,7 +1386,7 @@ define(["jquery",
 					return "n/a (no revisions after event)."
 				}
 				var lr = linearRegression(r.after_text_lengths);
-				return "{0} (R<sup>2</sup>: {1}, slope: {2})".format(lr.r2 < 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2));
+				return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r < 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
 			},
 			h8: function(r) {
 				if(_.isUndefined(r.after_anon_count)) {
@@ -1380,7 +1399,7 @@ define(["jquery",
 					return "n/a (no located revisions after event)."
 				}
 				var lr = linearRegression(r.after_sig_dists);
-				return "{0} (R<sup>2</sup>: {1}, slope: {2})".format(lr.r2 > 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2));
+				return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r > 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
 			},
 			h10: function(r) {
 				if(_.isUndefined(r.during_local_ratios)) {
@@ -1397,7 +1416,7 @@ define(["jquery",
 					return "n/a (no located revisions after event)."
 				}
 				var lr = linearRegression(r.after_sig_dists_survivors);
-				return "{0} (R<sup>2</sup>: {1}, slope: {2})".format(lr.r2 > 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2));
+				return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r > 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
 			},
 			render: function() {
 				var r = Article.get('results');
@@ -1444,8 +1463,7 @@ define(["jquery",
 				cols = [
 					{label: 'Date', type: 'date'},
 					{label: 'Local', type: 'number'},
-					{label: 'Distant', type: 'number'},
-					{label: 'Unknown', type: 'number'}
+					{label: 'Distant', type: 'number'}
 				];
 				chart.renderTable(cols, r.during_local_ratios, null, 600, "Contributor localness of text survival during event");
 
@@ -1600,6 +1618,7 @@ define(["jquery",
 					google.visualization.events.addListener(this.chart, 'select', onSelect);
 				}
 				this.chart.draw(table, config);
+				return table;
 			}
 		});
 
@@ -1610,6 +1629,7 @@ define(["jquery",
 				if(_.size(revisions)) {
 					this.row();
 					var me = this;
+					var table;
 					var cols = [
 						// TODO add username
 						{label: 'Date', type: 'date'},
@@ -1621,10 +1641,10 @@ define(["jquery",
 					});
 					var onSelect = function(){
 						var sel = me.chart.getSelection()[0];
-						var revid = me.table.getValue(sel.row, 2);
-						revisions.current(revid);
+						var revid = table.getValue(sel.row, 2);
+						Article.get('revisions').current(revid);
 					};
-					this.renderTable(cols, rows, onSelect);
+					table = this.renderTable(cols, rows, onSelect);
 				}
 				return this;
 			}

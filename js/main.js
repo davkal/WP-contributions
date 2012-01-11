@@ -35,6 +35,9 @@ require(["jquery",
 		window._ = _;
 
 		_.mixin({
+			has: function(list, property) {
+				return _.filter(list, function(i){return i.has(property)});
+			}, 
 			random: function(list) {
 				if(list.length) {
 					var index = Math.floor(Math.random() * list.length);
