@@ -512,6 +512,8 @@ define(["jquery",
 			},
 			results: function() {
 				if(this.has('results') || !this.relevant()) {
+					console.log("Article does not qualify:", this.get("title"));
+					App.setItem(this.get('input'), {});
 					this.trigger('complete');
 					return this.get('results') || null;
 				}
@@ -523,6 +525,8 @@ define(["jquery",
 
 				var res = {}, grouped, location, author, revision, username;
 				res.title = res.id = title;
+				res.summary = this.toString();
+
 				revision = revisions.at(0);
 				res.created = new Date(revision.get('timestamp'));
 				res.start = this.get('start');
@@ -1680,24 +1684,27 @@ define(["jquery",
 			},
 			analyzeNext: function(todo) {
 				todo = todo || _.shuffle(Group.pluck('id'));
-				var previous = window.Article;
-				if(previous) {
-					console.log(previous.toString());
-				}
-				var delay = previous ? GROUP_DELAY : 0;
+				var delay = Group.length == todo.length ? 0 : GROUP_DELAY;
 				var next = todo.pop();
-				// TODO skip articles where results are present
 				var me = this;
 				if(next) {
 					_.debounce(function() {
-						var article = App.analyzeArticle(next);
-						article.bind('complete', function() {
-							var results = article.get('results');
-							if(results) {
-								Results.add(results);
+						var cached = App.getItem(next);
+						if(cached) {
+							if(!_.isEmpty(cached)) {
+								Results.add(cached);
 							}
 							me.analyzeNext(todo);
-						});
+						} else {
+							var article = App.analyzeArticle(next);
+							article.bind('complete', function() {
+								var results = article.get('results');
+								if(results) {
+									Results.add(results);
+								}
+								me.analyzeNext(todo);
+							});
+						}
 					}, delay)();
 				} else {
 					console.log("Group analysis complete.");
@@ -1706,6 +1713,9 @@ define(["jquery",
 			analyzeGroup: function(input) {
 				window.Group = new PageList;
 				window.Results = new Backbone.Collection;
+				Results.bind('add', function(r) {
+					console.log("Done:", r.get('summary'));
+				});
 				Group.bind('loaded', this.analyzeNext, this);
 				App.status("Page list...");
 				Group.fetchPages(input);
