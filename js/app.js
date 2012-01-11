@@ -48,7 +48,7 @@ define(["jquery",
 		}
 
 		window.CACHE_LIMIT = 100 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
-		window.GROUP_DELAY = 5 * 1000; // (ms) time before analyzing next article
+		window.GROUP_DELAY = 1 * 1000; // (ms) time before analyzing next article
 		window.RE_PARENTHESES = /\([^\)]*\)/g;
 		window.RE_WIKI_LINK = /\[\[[^\]]*\]\]/g;
 
@@ -447,6 +447,8 @@ define(["jquery",
 		window.MainArticle = Page.extend({
 			defaults: {
 				lang: 'en',
+				group: false,
+				thorough: false,
 				full_text: true
 			},
 			initialize: function() {
@@ -459,11 +461,19 @@ define(["jquery",
 
 				this.bind('change:input', this.retrieve, this); 
 				this.bind('change:pageid', this.fetchAdditionalData, this); 
-				this.bind('additional', authors.retrieve, authors);
 				this.bind('done', this.results, this);
+				this.bind('additional', function() {
+					// skip analysis of irrelevant articles when in group mode
+					if(!this.get('group') || this.relevant()) {
+						authors.retrieve();
+					} else {
+						this.trigger('done', this);
+					}
+				}, this);
 
 				authors.bind('loaded', revisions.retrieve, revisions);
 				authors.bind('loaded', this.calcSignatureDistance, this);
+				authors.bind('done', this.calcSignatureDistance, this);
 				authors.bind('done', revisions.calcSignatureDistance, revisions);
 
 				revisions.bind('loaded', revisions.calcSignatureDistance, revisions);
@@ -476,16 +486,17 @@ define(["jquery",
 				revisions.bind('distancedone', function(){this.done('revisiondistances')}, this);
 				revisions.bind('authorsdone', function(){this.done('revisionauthors')}, this);
 
-				if(App.details) {
+				revisions.bind('loaded', revisions.current, revisions);
+				current.bind('change:id', current.fetchAuthors, current);
+				// trigger to load authors for all remaining revisions
+				current.bind('authors', revisions.fetchAuthors, revisions);
+
+				if(this.get('thorough')) {
 					authors.bind('loaded', authors.checkUserPages, authors);
-					revisions.bind('loaded', revisions.current, revisions);
-					current.bind('change:id', current.fetchAuthors, current);
-					// trigger to load authors for all remaining revisions
-					current.bind('authors', revisions.fetchAuthors, revisions);
 				} else {
 					// trigger mock events to short circuit 
 					authors.bind('loaded', function() {this.trigger('done');}, authors);
-					revisions.bind('loaded', function() {this.trigger('authorsdone');}, revisions);
+					//revisions.bind('loaded', function() {this.trigger('authorsdone');}, revisions);
 				}
 
 				this.set({
@@ -505,7 +516,7 @@ define(["jquery",
 				}
 			},
 			relevant: function() {
-				if(!this.has('location') || !this.has('start') || this.get('start').getFullYear() < 1900) {
+				if(!this.has('location') || !this.has('start') || this.get('start').getFullYear() < 2001) {
 					return false;
 				}
 				return true;
@@ -1118,9 +1129,10 @@ define(["jquery",
 				});
 			},
 			fetchAuthors: function() {
-				var max = 25; // n < 2 * max
+				var max = 10; // n < 2 * max
 				var me = this;
-				if(!this.sample && this.length > max * 2) {
+				var thorough = Article.get('thorough');
+				if(!thorough && !this.sample && this.length > max * 2) {
 					// limit to sample for text survival analysis
 					var mod = Math.round(this.length / max);
 					this.each(function(r, i) {
@@ -1654,7 +1666,135 @@ define(["jquery",
 			}
 		});
 
-		// TODO GroupResultsView
+		window.GroupHypothesesView = SectionView.extend({
+			title: "Hypotheses",
+			h1: function(r) {
+				var deltas = _.compact(r.pluck('delta'));
+				console.log(deltas);
+				var delta = _.sum(deltas) / deltas.length;
+				return delta ? "{0} ({1})".format(delta < 3 ? 'True' : 'False', delta.toFixed(1)) : "n/a (no start date).";
+			},
+			/*
+			h3: function(r) {
+				return "{0} ({1})".format(r.first_lang == 'en' ? 'True' : 'False', r.first_lang);
+			},
+			h4: function(r) {
+				if(_.isUndefined(r.creator_dist)) {
+				   return "n/a (no creator location).";
+				}
+		 		return "{0} ({1} km)".format(r.creator_dist <= r.mean_dist ? 'True' : 'False', r.creator_dist.toFixed(1));
+			},
+			h5: function(r) {
+				if(_.isUndefined(r.early_anon_count)) {
+					return "n/a (no early revisions)."
+				}
+				return "{0} ({1} registered, {2} anonymous)".format(r.early_anon_count > r.early_registered_count ? 'True' : 'False', r.early_registered_count, r.early_anon_count);
+			},
+			h6: function(r) {
+				if(_.isUndefined(r.during_local_count)) {
+					return "n/a (no revisions during event)."
+				}
+				return "{0} ({1} local, {2} distant, {3} unknown)".format(r.during_local_count > r.during_distant_count ? 'True' : 'False', r.during_local_count, r.during_distant_count, r.during_no_location_count);
+			},
+			h7: function(r) {
+				if(_.isUndefined(r.after_text_lengths)) {
+					return "n/a (no revisions after event)."
+				}
+				var lr = linearRegression(r.after_text_lengths);
+				return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r < 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
+			},
+			h8: function(r) {
+				if(_.isUndefined(r.after_anon_count)) {
+					return "n/a (no late revisions)."
+				}
+				return "{0} ({1} registered, {2} anonymous)".format(r.after_registered_count > r.after_anon_count ? 'True' : 'False', r.after_registered_count, r.after_anon_count);
+			},
+			h9: function(r) {
+				if(_.isUndefined(r.after_sig_dists)) {
+					return "n/a (no located revisions after event)."
+				}
+				var lr = linearRegression(r.after_sig_dists);
+				return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r > 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
+			},
+			h10: function(r) {
+				if(_.isUndefined(r.during_local_ratios)) {
+					return "n/a (no located revisions during event)."
+				}
+				var moreLocals = 0;
+				_.each(r.during_local_ratios, function(arr) {
+					moreLocals +=  arr[1] > arr[2] ? 1 : 0;
+				});
+				return "{0} ({1}/{2} revisions with more locals)".format(r.during_local_ratios.length == moreLocals ? 'True' : 'False', moreLocals, r.during_local_ratios.length);
+			},
+			h11: function(r) {
+				if(_.isUndefined(r.after_sig_dists_survivors)) {
+					return "n/a (no located revisions after event)."
+				}
+				var lr = linearRegression(r.after_sig_dists_survivors);
+				return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r > 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
+			},
+			*/
+			render: function() {
+				var r = Results;
+				this.row(['span-one-third', 'span-two-thirds']);
+				if(r.length == 0) {
+					this.display("Article group empty", "No articles were found that qualify for analysis.");
+					return this;
+				}
+				// single article hypotheses
+				this.display('1. Articles were created in the first 3 days', this.h1(r));
+				/*
+				this.display('2. Recent articles are created sooner', "n/a (single article).");
+				this.display('3. First article was created in English', this.h3(r));
+				this.display('4. Creator distance was less than mean distance', this.h4(r));
+				this.display('5. Most of early contributors were anonymous', this.h5(r));
+				this.display('6. Most of contributions during the event had distance less than mean', this.h6(r));
+				this.display('7. Revisions are getting smaller in length after event', this.h7(r));
+				this.display('8. Most late contributors were registered users', this.h8(r));
+				this.display('9. Spatial distribution less local after event', this.h9(r));
+				this.display('10. Text consists of more local contributions during event', this.h10(r));
+				this.display('11. Spatial distribution of surviving contribution becomes less local', this.h11(r));
+
+				this.column(2);
+				var cols, chart;
+
+				// H7 article length chart
+				chart = this.subview(TimeLineChartView);
+				cols = [
+					{label: 'Date', type: 'date'},
+					{label: 'Length', type: 'number'}
+				];
+				chart.renderTable(cols, r.after_text_lengths, null, 600, "Text lengths after event");
+
+				// H9 sig dists after event chart
+				chart = this.subview(TimeLineChartView);
+				cols = [
+					{label: 'Date', type: 'date'},
+					{label: 'Sd(km)', type: 'number'}
+				];
+				chart.renderTable(cols, r.after_sig_dists, null, 600, "Signature distance after event");
+
+				// H10 local vs distant column chart
+				chart = this.subview(TimeLineChartView);
+				cols = [
+					{label: 'Date', type: 'date'},
+					{label: 'Local', type: 'number'},
+					{label: 'Distant', type: 'number'}
+				];
+				chart.renderTable(cols, r.during_local_ratios, null, 600, "Contributor localness of text survival during event");
+
+				// H11 sig dists survivors after chart
+				chart = this.subview(TimeLineChartView);
+				cols = [
+					{label: 'Date', type: 'date'},
+					{label: 'Sd(km)', type: 'number'}
+				];
+				chart.renderTable(cols, r.after_sig_dists_survivors, null, 600, "Signature distance (survivors) after event");
+				
+				*/
+				return this;
+			}
+		});
 
 		// NICE TO HAVE
 		// make Locations global for re-use
@@ -1675,7 +1815,7 @@ define(["jquery",
 			},
 			initialize: function() {
 				this.input = this.$("#input");
-				this.$group = this.$("#group");
+				this.$special = this.$("#special");
 				this.statusEl = $('#status');
 				this.cache = $('#cache');
 				this.container = $('#content .container');
@@ -1688,6 +1828,7 @@ define(["jquery",
 				var next = todo.pop();
 				var me = this;
 				if(next) {
+					App.status('Group progress {0}/{1}'.format(Group.length - todo.length, Group.length));
 					_.debounce(function() {
 						var cached = App.getItem(next);
 						if(cached) {
@@ -1696,7 +1837,7 @@ define(["jquery",
 							}
 							me.analyzeNext(todo);
 						} else {
-							var article = App.analyzeArticle(next);
+							var article = me.analyzeArticle(next);
 							article.bind('complete', function() {
 								var results = article.get('results');
 								if(results) {
@@ -1708,29 +1849,38 @@ define(["jquery",
 					}, delay)();
 				} else {
 					console.log("Group analysis complete.");
+					Group.trigger('complete');
 				}
 			},
 			analyzeGroup: function(input) {
 				window.Group = new PageList;
 				window.Results = new Backbone.Collection;
+
+				var gv = new GroupHypothesesView;
+
+				Group.bind('loaded', this.analyzeNext, this);
+				Group.bind('complete', this.clear, this);
+				Group.bind('complete', gv.render, gv);
 				Results.bind('add', function(r) {
 					console.log("Done:", r.get('summary'));
 				});
-				Group.bind('loaded', this.analyzeNext, this);
+
 				App.status("Page list...");
+				// kicking things off
 				Group.fetchPages(input);
 			},
 			analyzeArticle: function(input) {
 				if(window.Article) {
+					Article.unbind();
 					this.clear();
 				}
 
-				window.Article = new MainArticle;
+				window.Article = new MainArticle({group: this.group, thorough: this.thorough});
 				var authors = Article.get('authors');
 
-				var av = new Overview();
-				var pv = new PropertiesView();
-				var hv = new HypothesesView();
+				var av = new Overview;
+				var pv = new PropertiesView;
+				var hv = new HypothesesView;
 
 				Article.bind('change:pageid', av.render, av);
 				Article.bind('change:location', pv.render, pv);
@@ -1739,7 +1889,7 @@ define(["jquery",
 				Article.bind('change:results', hv.render, hv);
 				authors.bind('loaded', av.render, av);
 
-				if(this.details && google.visualization) {
+				if(!this.group && google.visualization) {
 					var revisions = Article.get('revisions');
 					var current = Article.get('current');
 
@@ -1807,8 +1957,6 @@ define(["jquery",
 					.parents('.clearfix')
 					.removeClass('error');
 				$('a[href!="#"]', this.nav).remove();
-
-				Article.unbind();
 			},
 			link: function(sec) {
 				if(!$('a[href="#{0}"]'.format(sec.id), this.nav).length) {
@@ -1822,25 +1970,17 @@ define(["jquery",
 					.addClass('error');
 				App.status(text);
 			}, 
-			checkGroup: _.throttle(function(text) {
-				var isGroup = false;
-				if(text.indexOf(':')>=0) {
-					isGroup = true;
-				}
-				this.$group.prop('checked', isGroup).change();
-			}, 1000),
 			analyze: function(input) {
-				if(this.$group.prop('checked')) {
-					this.details = false;
+				this.group = input.indexOf(':') >= 0;
+				this.thorough = this.$special.prop('checked');
+				if(this.group) {
 					this.analyzeGroup(input);
 				} else {
-					this.details = true;
 					this.analyzeArticle(input);
 				}
 			},
 			analyzeExample: function(e) {
 				var input = $(e.target).attr("title");
-				this.checkGroup(input);
 				this.input.val(input);
 				return this.analyzeOnClick();
 			},
@@ -1853,7 +1993,6 @@ define(["jquery",
 			},
 			analyzeOnEnter: function(e) {
 				var text = this.input.val();
-				this.checkGroup(text);
 				if (!text || (e.keyCode != 13)) return;
 				this.analyze(text);
 				return false;
