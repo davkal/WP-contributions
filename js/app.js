@@ -1708,11 +1708,29 @@ define(["jquery",
 					return ["{0}".format(i+1), r];
 				});
 				var chart = this.subview(GoogleChartView);
-				cols = [
+				var cols = [
 					{label: 'Days', type: 'string'},
 					{label: 'Articles', type: 'number'}
 				];
-				chart.renderTable('ColumnChart', cols, rows, null, 600, "Histogram, days after article creation");
+				chart.renderTable('ColumnChart', cols, rows, null, 600);
+			},
+			h2: function(r) {
+				// prepare data
+				var rows = r.map(function(res) {
+					return [res.get('created'), res.get('delta')];
+				});
+				// text
+				var text = "Scatter plot of all delays between event start date and date of earliest revision.";
+				this.row(['span-one-third', 'span-two-thirds'], "H2", "The more recent an article, the shorter is the delay between the event start and article creation.");
+				this.display('Articles were created in the first 3 days', text);
+				this.column(2);
+				// chart
+				var chart = this.subview(GoogleChartView);
+				var cols = [
+					{label: 'Date', type: 'date'},
+					{label: 'Delay (d)', type: 'number'}
+				];
+				chart.renderTable('ScatterChart', cols, rows, null, 600);
 			},
 			/*
 			h3: function(r) {
