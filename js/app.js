@@ -1732,10 +1732,29 @@ define(["jquery",
 				];
 				chart.renderTable('ScatterChart', cols, rows, null, 600);
 			},
-			/*
 			h3: function(r) {
-				return "{0} ({1})".format(r.first_lang == 'en' ? 'True' : 'False', r.first_lang);
+				// prepare data
+				var langs = _.compact(r.pluck('first_lang'));
+				var english = _.filter(langs, function(l) {return l == 'en'});
+				var ratio = english.length / langs.length;
+				// text
+				var text =  "{0} ({1}%)".format(ratio > 0.5 ? 'True' : 'False', Math.round(ratio * 100));
+				this.row(['span-one-third', 'span-two-thirds'], "H3", "Articles are being created first in the English Wikipedia.");
+				this.display('Articles were created in the English Wikipedia first', text);
+				this.column(2);
+				// chart
+				var rows = _.groupBy(langs, function(l) { return l });
+				rows = _.map(rows, function(arr, l) {
+					return [l, arr.length];
+				});
+				var chart = this.subview(GoogleChartView);
+				var cols = [
+					{label: 'Language', type: 'string'},
+					{label: 'Articles', type: 'number'}
+				];
+				chart.renderTable('ColumnChart', cols, rows, null, 600);
 			},
+			/*
 			h4: function(r) {
 				if(_.isUndefined(r.creator_dist)) {
 				   return "n/a (no creator location).";
@@ -1808,20 +1827,6 @@ define(["jquery",
 				}
 
 				/*
-				this.display('2. Recent articles are created sooner', "n/a (single article).");
-				this.display('3. First article was created in English', this.h3(r));
-				this.display('4. Creator distance was less than mean distance', this.h4(r));
-				this.display('5. Most of early contributors were anonymous', this.h5(r));
-				this.display('6. Most of contributions during the event had distance less than mean', this.h6(r));
-				this.display('7. Revisions are getting smaller in length after event', this.h7(r));
-				this.display('8. Most late contributors were registered users', this.h8(r));
-				this.display('9. Spatial distribution less local after event', this.h9(r));
-				this.display('10. Text consists of more local contributions during event', this.h10(r));
-				this.display('11. Spatial distribution of surviving contribution becomes less local', this.h11(r));
-
-				this.column(2);
-				var cols, chart;
-
 				// H7 article length chart
 				chart = this.subview(GoogleChartView);
 				cols = [
