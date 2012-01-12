@@ -471,14 +471,23 @@ define(["jquery",
 					}
 				}, this);
 
-				authors.bind('loaded', revisions.retrieve, revisions);
-				authors.bind('loaded', this.calcSignatureDistance, this);
 				authors.bind('done', this.calcSignatureDistance, this);
 				authors.bind('done', revisions.calcSignatureDistance, revisions);
+				authors.bind('loaded', function() {
+					// skip analysis of irrelevant articles when in group mode
+					if(this.relevant()) {
+						revisions.retrieve();
+						this.calcSignatureDistance();
+						authors.checkUserPages();
+					} else {
+						this.trigger('done', this);
+					}
+				}, this);
 
 				revisions.bind('loaded', revisions.calcSignatureDistance, revisions);
+				revisions.bind('loaded', revisions.current, revisions);
+				revisions.bind('loaded', languages.fetchNext, languages);
 
-				languages.bind('reset', languages.fetchNext, languages);
 				languages.bind('change', languages.fetchNext, languages);
 				languages.bind('done', function(){this.done('languages')}, this);
 
@@ -486,18 +495,9 @@ define(["jquery",
 				revisions.bind('distancedone', function(){this.done('revisiondistances')}, this);
 				revisions.bind('authorsdone', function(){this.done('revisionauthors')}, this);
 
-				revisions.bind('loaded', revisions.current, revisions);
 				current.bind('change:id', current.fetchAuthors, current);
 				// trigger to load authors for all remaining revisions
 				current.bind('authors', revisions.fetchAuthors, revisions);
-
-				if(this.get('thorough')) {
-					authors.bind('loaded', authors.checkUserPages, authors);
-				} else {
-					// trigger mock events to short circuit 
-					authors.bind('loaded', function() {this.trigger('done');}, authors);
-					//revisions.bind('loaded', function() {this.trigger('authorsdone');}, revisions);
-				}
 
 				this.set({
 					authors: authors,
@@ -516,7 +516,10 @@ define(["jquery",
 				}
 			},
 			relevant: function() {
-				if(!this.has('location') || !this.has('start') || this.get('start').getFullYear() < 2001) {
+				if(!this.has('location') 
+						|| !this.has('start') 
+						|| this.get('start') > this.get('created')
+						|| this.get('start').getFullYear() < 2001) {
 					return false;
 				}
 				return true;
@@ -624,9 +627,11 @@ define(["jquery",
 				// H7 size of all revs after end
 				if(gr.after) {
 					var list = revisions.sample ? _.has(gr.after, 'selected') : gr.after;
-					res.after_text_lengths = _.map(list, function(r) {
-						return [r.get('timestamp'), r.get('length')];
-					});
+					if(list.length > 1) {
+						res.after_text_lengths = _.map(list, function(r) {
+							return [r.get('timestamp'), r.get('length')];
+						});
+					}
 				}
 				
 				// H8 anon/regs count after end
@@ -658,25 +663,29 @@ define(["jquery",
 				// H10 for all revs during count local and distant survivors
 				if(gr.during) {
 					var list = revisions.sample ? _.has(gr.during, 'selected') : gr.during;
-					res.during_local_ratios = _.map(list, function(r) {
-						grouped = _.groupBy(r.get('authors'), function(username) {
-							if(author = authors.get(username)) {
-								if(location = author.get('location')) {
-									return location.get('distance') < res.mean_dist ? 'local' : 'distant';
+					if(list.length > 1) {
+						res.during_local_ratios = _.map(list, function(r) {
+							grouped = _.groupBy(r.get('authors'), function(username) {
+								if(author = authors.get(username)) {
+									if(location = author.get('location')) {
+										return location.get('distance') < res.mean_dist ? 'local' : 'distant';
+									}
 								}
-							}
-							return 'nolocation';
+								return 'nolocation';
+							});
+							return [r.get('timestamp'), _.size(grouped.local) || 0, _.size(grouped.distant) || 0];
 						});
-						return [r.get('timestamp'), _.size(grouped.local) || 0, _.size(grouped.distant) || 0];
-					});
+					}
 				}
 
 				// H11 [ts, SD(survivor)] for all revs after end 
 				if(gr.after) {
 					var list = revisions.sample ? _.has(gr.after, 'selected') : gr.after;
-					res.after_sig_dists_survivors = _.map(list, function(r) {
-						return [r.get('timestamp'), r.get('sig_dist_survivors')];
-					});
+					if(list.length > 1) {
+						res.after_sig_dists_survivors = _.map(list, function(r) {
+							return [r.get('timestamp'), r.get('sig_dist_survivors')];
+						});
+					}
 				}
 
 				App.status();
@@ -843,7 +852,13 @@ define(["jquery",
 				if(next) {
 					var userPage = new UserPage({title: next.get('urlencoded'), author: next});
 					next.set({page: userPage});
-					userPage.bind('loaded', this.checkUserPages, this);
+					if(App.thorough) {
+						// check all users
+						userPage.bind('loaded', this.checkUserPages, this);
+					} else {
+						// only first user
+						userPage.bind('loaded', function() {this.trigger('done');}, this);
+					}
 					userPage.bind('country', this.addCountry, this);
 					App.status('User page {0}...'.format(next.id));
 					userPage.retrieve();
@@ -866,6 +881,8 @@ define(["jquery",
 					App.status("Parsing contributors...");
 				}
 				var info = _.extract(res, ["first_edit", "count", "editor_count", "anon_count", "last_edit", "minor_count"]);
+				// prelimenary
+				info.created = new Date(info.first_edit.timestamp * 1000);
 				Article.set(info);
 
 				// parsing locations
@@ -1022,6 +1039,7 @@ define(["jquery",
 				this.limitkey = isTemplate ? "eilimit" : "cmlimit";
 				this.namespace = isTemplate ? "einamespace" : "cmnamespace";
 
+				App.status("Getting article list...");
 				this.retrieve();
 			},
 			url: function() {
@@ -1131,7 +1149,7 @@ define(["jquery",
 			fetchAuthors: function() {
 				var max = 10; // n < 2 * max
 				var me = this;
-				var thorough = Article.get('thorough');
+				var thorough = Article.thorough;
 				if(!thorough && !this.sample && this.length > max * 2) {
 					// limit to sample for text survival analysis
 					var mod = Math.round(this.length / max);
@@ -1242,12 +1260,12 @@ define(["jquery",
 					.format(label, rows, value));
 				return $('textarea', this.form).last();
 			},
-			header: function() {
-				return '<div class="page-header"><h1>{0} <small>{1}</small></h1></div>'.format(this.title, this.subtitle || "");
+			header: function(title, subtitle) {
+				return '<div class="page-header"><h1>{0} <small>{1}</small></h1></div>'.format(title || this.title, subtitle || this.subtitle || "");
 			},
 			column: function(n) {
 				this.body = this.$('.row > div:nth-child({0})'.format(n));
-				this.form = $('form', this.body);
+				this.form = $('form', this.body).last();
 			},
 			subview: function(cls, model) {
 				if(model) {
@@ -1256,17 +1274,21 @@ define(["jquery",
 					return new cls({el: this.body});
 				}
 			},
-			row: function(spans) {
+			row: function(spans, title, subtitle) {
 				//console.log("Rendering", this.title);
 				spans = spans || ['span10'];
-				var html = this.header();
+				var html = this.header(title, subtitle);
 				html += '<div class="row">';
 				var formClass = spans.length > 1 ? "form-stacked" : "";
 				_.each(spans, function(span) {
 					html += '<div class="{0}"><form class="{1}"/></div>'.format(span, formClass);
 				});
 				html += '</div>';
-				$(this.el).html(html);
+				if(title) {
+					$(this.el).append(html);
+				} else {
+					$(this.el).html(html);
+				}
 				this.column(1);
 				App.link(this);
 				return this;
@@ -1399,7 +1421,7 @@ define(["jquery",
 			},
 			h7: function(r) {
 				if(_.isUndefined(r.after_text_lengths)) {
-					return "n/a (no revisions after event)."
+					return "n/a (not enough revisions after event)."
 				}
 				var lr = linearRegression(r.after_text_lengths);
 				return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r < 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
@@ -1412,7 +1434,7 @@ define(["jquery",
 			},
 			h9: function(r) {
 				if(_.isUndefined(r.after_sig_dists)) {
-					return "n/a (no located revisions after event)."
+					return "n/a (not enough located revisions after event)."
 				}
 				var lr = linearRegression(r.after_sig_dists);
 				return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r > 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
@@ -1429,7 +1451,7 @@ define(["jquery",
 			},
 			h11: function(r) {
 				if(_.isUndefined(r.after_sig_dists_survivors)) {
-					return "n/a (no located revisions after event)."
+					return "n/a (not enough located revisions after event)."
 				}
 				var lr = linearRegression(r.after_sig_dists_survivors);
 				return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r > 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
@@ -1459,37 +1481,37 @@ define(["jquery",
 				var cols, chart;
 
 				// H7 article length chart
-				chart = this.subview(TimeLineChartView);
+				chart = this.subview(GoogleChartView);
 				cols = [
 					{label: 'Date', type: 'date'},
 					{label: 'Length', type: 'number'}
 				];
-				chart.renderTable(cols, r.after_text_lengths, null, 600, "Text lengths after event");
+				chart.renderTable('LineChart', cols, r.after_text_lengths, null, 600, "Text lengths after event");
 
 				// H9 sig dists after event chart
-				chart = this.subview(TimeLineChartView);
+				chart = this.subview(GoogleChartView);
 				cols = [
 					{label: 'Date', type: 'date'},
 					{label: 'Sd(km)', type: 'number'}
 				];
-				chart.renderTable(cols, r.after_sig_dists, null, 600, "Signature distance after event");
+				chart.renderTable('LineChart', cols, r.after_sig_dists, null, 600, "Signature distance after event");
 
 				// H10 local vs distant column chart
-				chart = this.subview(TimeLineChartView);
+				chart = this.subview(GoogleChartView);
 				cols = [
 					{label: 'Date', type: 'date'},
 					{label: 'Local', type: 'number'},
 					{label: 'Distant', type: 'number'}
 				];
-				chart.renderTable(cols, r.during_local_ratios, null, 600, "Contributor localness of text survival during event");
+				chart.renderTable('LineChart', cols, r.during_local_ratios, null, 600, "Contributor localness of text survival during event");
 
 				// H11 sig dists survivors after chart
-				chart = this.subview(TimeLineChartView);
+				chart = this.subview(GoogleChartView);
 				cols = [
 					{label: 'Date', type: 'date'},
 					{label: 'Sd(km)', type: 'number'}
 				];
-				chart.renderTable(cols, r.after_sig_dists_survivors, null, 600, "Signature distance (survivors) after event");
+				chart.renderTable('LineChart', cols, r.after_sig_dists_survivors, null, 600, "Signature distance (survivors) after event");
 				
 				return this;
 			}
@@ -1603,8 +1625,8 @@ define(["jquery",
 			}
 		});
 
-		window.TimeLineChartView = SectionView.extend({
-			renderTable: function(cols, rows, onSelect, width, title) {
+		window.GoogleChartView = SectionView.extend({
+			renderTable: function(type, cols, rows, onSelect, width, title) {
 				width = width || 800;
 				var config = {
 					strictFirstColumnType: true,
@@ -1628,8 +1650,8 @@ define(["jquery",
 					});
 					table.addRows(rows);
 				}
-				var ct = this.div(_.uniqueId("lineChart"));
-				this.chart = new google.visualization.LineChart(ct);
+				var ct = this.div(_.uniqueId(type));
+				this.chart = new google.visualization[type](ct);
 				if(onSelect) {
 					google.visualization.events.addListener(this.chart, 'select', onSelect);
 				}
@@ -1638,7 +1660,7 @@ define(["jquery",
 			}
 		});
 
-		window.LocalnessView = TimeLineChartView.extend({
+		window.LocalnessView = GoogleChartView.extend({
 			title: "Localness",
 			render: function() {
 				var revisions = Article.get('revisions').has('sig_dist');
@@ -1660,7 +1682,7 @@ define(["jquery",
 						var revid = table.getValue(sel.row, 2);
 						Article.get('revisions').current(revid);
 					};
-					table = this.renderTable(cols, rows, onSelect);
+					table = this.renderTable('LineChart', cols, rows, onSelect);
 				}
 				return this;
 			}
@@ -1669,10 +1691,28 @@ define(["jquery",
 		window.GroupHypothesesView = SectionView.extend({
 			title: "Hypotheses",
 			h1: function(r) {
+				// prepare data
 				var deltas = _.compact(r.pluck('delta'));
-				console.log(deltas);
 				var delta = _.sum(deltas) / deltas.length;
-				return delta ? "{0} ({1})".format(delta < 3 ? 'True' : 'False', delta.toFixed(1)) : "n/a (no start date).";
+				// text
+				var text =  delta ? "{0} ({1})".format(delta < 3 ? 'True' : 'False', delta.toFixed(1)) : "n/a (no start date).";
+				this.row(['span-one-third', 'span-two-thirds'], "H1", "Articles are created with only a short delay after the start date of the event.");
+				this.display('Articles were created in the first 3 days', text);
+				this.column(2);
+				// chart
+				var rows = _.map(_.range(Math.floor(_.max(deltas)) + 1), function(d) { return 0 });
+				_.each(deltas, function(d) {
+					rows[Math.floor(d)]++;
+				});
+				rows = _.map(rows, function(r, i) {
+					return ["{0}".format(i+1), r];
+				});
+				var chart = this.subview(GoogleChartView);
+				cols = [
+					{label: 'Days', type: 'string'},
+					{label: 'Articles', type: 'number'}
+				];
+				chart.renderTable('ColumnChart', cols, rows, null, 600, "Histogram, days after article creation");
 			},
 			/*
 			h3: function(r) {
@@ -1739,10 +1779,16 @@ define(["jquery",
 				this.row(['span-one-third', 'span-two-thirds']);
 				if(r.length == 0) {
 					this.display("Article group empty", "No articles were found that qualify for analysis.");
-					return this;
+				} else {
+					this.display("Articles", r.length);
+					// render all hypotheses
+					var func;
+					_.each(_.range(1, 12), function(i) {
+						func = "h{0}".format(i);
+						this[func] && this[func](r);
+					}, this);
 				}
-				// single article hypotheses
-				this.display('1. Articles were created in the first 3 days', this.h1(r));
+
 				/*
 				this.display('2. Recent articles are created sooner', "n/a (single article).");
 				this.display('3. First article was created in English', this.h3(r));
@@ -1759,37 +1805,37 @@ define(["jquery",
 				var cols, chart;
 
 				// H7 article length chart
-				chart = this.subview(TimeLineChartView);
+				chart = this.subview(GoogleChartView);
 				cols = [
 					{label: 'Date', type: 'date'},
 					{label: 'Length', type: 'number'}
 				];
-				chart.renderTable(cols, r.after_text_lengths, null, 600, "Text lengths after event");
+				chart.renderTable('LineChart', cols, r.after_text_lengths, null, 600, "Text lengths after event");
 
 				// H9 sig dists after event chart
-				chart = this.subview(TimeLineChartView);
+				chart = this.subview(GoogleChartView);
 				cols = [
 					{label: 'Date', type: 'date'},
 					{label: 'Sd(km)', type: 'number'}
 				];
-				chart.renderTable(cols, r.after_sig_dists, null, 600, "Signature distance after event");
+				chart.renderTable('LineChart', cols, r.after_sig_dists, null, 600, "Signature distance after event");
 
 				// H10 local vs distant column chart
-				chart = this.subview(TimeLineChartView);
+				chart = this.subview(GoogleChartView);
 				cols = [
 					{label: 'Date', type: 'date'},
 					{label: 'Local', type: 'number'},
 					{label: 'Distant', type: 'number'}
 				];
-				chart.renderTable(cols, r.during_local_ratios, null, 600, "Contributor localness of text survival during event");
+				chart.renderTable('LineChart', cols, r.during_local_ratios, null, 600, "Contributor localness of text survival during event");
 
 				// H11 sig dists survivors after chart
-				chart = this.subview(TimeLineChartView);
+				chart = this.subview(GoogleChartView);
 				cols = [
 					{label: 'Date', type: 'date'},
 					{label: 'Sd(km)', type: 'number'}
 				];
-				chart.renderTable(cols, r.after_sig_dists_survivors, null, 600, "Signature distance (survivors) after event");
+				chart.renderTable('LineChart', cols, r.after_sig_dists_survivors, null, 600, "Signature distance (survivors) after event");
 				
 				*/
 				return this;
@@ -1865,7 +1911,6 @@ define(["jquery",
 					console.log("Done:", r.get('summary'));
 				});
 
-				App.status("Page list...");
 				// kicking things off
 				Group.fetchPages(input);
 			},
@@ -1875,7 +1920,7 @@ define(["jquery",
 					this.clear();
 				}
 
-				window.Article = new MainArticle({group: this.group, thorough: this.thorough});
+				window.Article = new MainArticle({group: this.group});
 				var authors = Article.get('authors');
 
 				var av = new Overview;
@@ -1889,7 +1934,7 @@ define(["jquery",
 				Article.bind('change:results', hv.render, hv);
 				authors.bind('loaded', av.render, av);
 
-				if(!this.group && google.visualization) {
+				if(!this.group && google.visualization) { // goole stuff sometimes fails to load
 					var revisions = Article.get('revisions');
 					var current = Article.get('current');
 
