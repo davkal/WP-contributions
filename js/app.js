@@ -649,6 +649,7 @@ define(["jquery",
 					});
 					res.after_anon_count = _.size(grouped.anon);
 					res.after_registered_count = _.size(grouped.reg);
+					res.after_author_count = res.after_anon_count + res.after_registered_count;
 				}
 
 				// H9 [ts, SD(all)] for all revs after end 
@@ -1635,7 +1636,7 @@ define(["jquery",
 				var ct = this.div(id);
 				var w = 120,
 					h = 240,
-					m = [10, 20, 20, 20]; // top right bottom left
+					m = [10, 50, 20, 50]; // top right bottom left
 
 				var chart = d3.chart.box()
 					.whiskers(iqr(1.5))
@@ -1853,20 +1854,39 @@ define(["jquery",
 					chart.render(values);
 				}
 			},
-			/*
 			h7: function(r) {
-				if(_.isUndefined(r.after_text_lengths)) {
-					return "n/a (no revisions after event)."
+				// prepare data
+				var results = r.has('after_text_lengths');
+				var values = _.map(results, function(res) {
+					return linearRegression(res.get('after_text_lengths')).r;
+				});
+
+				this.row(['span-one-third', 'span-two-thirds'], "H7", "Articles of a political event that has ended will continuously shrink in size.");
+				this.display("Correlation between article age and text length", "{0} articles have contributions after the event.".format(results.length));
+				if(values.length) {
+					this.column(2);
+					// chart
+					var chart = this.subview(BoxChartView);
+					chart.render(values);
 				}
-				var lr = linearRegression(r.after_text_lengths);
-				return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r < 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
 			},
 			h8: function(r) {
-				if(_.isUndefined(r.after_anon_count)) {
-					return "n/a (no late revisions)."
+				// prepare data
+				var results = r.has('after_author_count');
+				var values = _.map(results, function(e) {
+					return e.get('after_anon_count') / e.get('after_author_count');
+				});
+
+				this.row(['span-one-third', 'span-two-thirds'], "H8", "After an event has ended, there will be more contributions from registered users than from anonymous ones.");
+				this.display("Anonymous contributions in the end", "{0} articles have contributions after the event.".format(results.length));
+				if(values.length) {
+					this.column(2);
+					// chart
+					var chart = this.subview(BoxChartView);
+					chart.render(values);
 				}
-				return "{0} ({1} registered, {2} anonymous)".format(r.after_registered_count > r.after_anon_count ? 'True' : 'False', r.after_registered_count, r.after_anon_count);
 			},
+			/*
 			h9: function(r) {
 				if(_.isUndefined(r.after_sig_dists)) {
 					return "n/a (no located revisions after event)."
