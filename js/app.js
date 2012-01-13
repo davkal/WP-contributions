@@ -13,9 +13,22 @@ define(["jquery",
 		'goog!visualization,1,packages:[corechart,geochart]'
 	], function($, dateFormat, _, Backbone, lz77, DateParser, CoordsParser, countries, botlist) {
 
+		window.CACHE_LIMIT = 100 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
+		window.GROUP_DELAY = 1 * 1000; // (ms) time before analyzing next article
+		window.RE_PARENTHESES = /\([^\)]*\)/g;
+		window.RE_WIKI_LINK = /\[\[[^\]]*\]\]/g;
+
 		window.c = function() {
 			console.log(arguments);
 		};
+
+		// date formatter
+		function dtformat(d) {
+			return $.format.date(new Date(d), "yyyy-MM-dd HH:mm:ss");
+		}
+		function dformat(d) {
+			return $.format.date(new Date(d), "yyyy-MM-dd");
+		}
 
 		// http://trentrichardson.com/2010/04/06/compute-linear-regressions-in-javascript/
 		function linearRegression(values){
@@ -48,11 +61,6 @@ define(["jquery",
 
 			return lr;
 		}
-
-		window.CACHE_LIMIT = 100 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
-		window.GROUP_DELAY = 1 * 1000; // (ms) time before analyzing next article
-		window.RE_PARENTHESES = /\([^\)]*\)/g;
-		window.RE_WIKI_LINK = /\[\[[^\]]*\]\]/g;
 
 		window.Model = Backbone.Model.extend({
 			checkDate: function(obj, attr) {
@@ -230,12 +238,12 @@ define(["jquery",
 			toString: function() {
 				var str = [this.get('title')];
 				var start = this.get('start');
-				str.push(start ? $.format.date(start, "yyyy-MM-dd") : "No start");
+				str.push(start ? dformat(start) : "No start");
 				if(this.has('ongoing')) {
 					str.push('ongoing');
 				} else {
 					var end = this.get('end');
-					str.push(end ? $.format.date(end, "yyyy-MM-dd") : "No end");
+					str.push(end ? dformat(end) : "No end");
 				}
 				var location = this.get('location');
 				str.push(location ? location.toString() : "Unknown");
@@ -1364,7 +1372,7 @@ define(["jquery",
 				if(m.has("first_edit")) {
 					obj = m.get('first_edit');
 					var user = '<a target="u" href="http://{0}.wikipedia.org/wiki/User:{1}">{1}</a>'.format(m.get('lang'), obj.user);
-					text = "{0} by {1}".format($.format.date(new Date(obj.timestamp * 1000), "yyyy-MM-dd hh:mm:ss"), user);
+					text = "{0} by {1}".format(dtformat(new Date(obj.timestamp * 1000)), user);
 					// FIXME timestamp is not UTC
 					this.display("Created", text);
 					this.display('Revision count', "{0} ({1} minor, {2} anonymous)"
@@ -1554,9 +1562,9 @@ define(["jquery",
 						this.display('Location', "{0}; {1}".format(loc.get('latitude').toFixed(3), loc.get('longitude').toFixed(3)));
 					}
 					if(start) {
-						this.display('Date', $.format.date(new Date(start), "yyyy-MM-dd"));
+						this.display('Date', dtformat(start));
 						if(start && end && end - start > 10000) {
-							this.display('End/Status', Article.has('ongoing') ? 'ongoing' : $.format.date(new Date(end), "yyyy-MM-dd"));
+							this.display('End/Status', Article.has('ongoing') ? 'ongoing' : dtformat(end));
 						}
 					}
 				}
@@ -1915,55 +1923,22 @@ define(["jquery",
 				}
 			},
 			render: function() {
+				var g = Group;
 				var r = Results;
 				this.row(['span-one-third', 'span-two-thirds']);
+				this.link(g.prefix, g.title, "http://{0}.wikipedia.org/wiki/{1}".format('en', g.title));
+				this.columns(2);
 				if(r.length == 0) {
 					this.display("Article group empty", "No articles were found that qualify for analysis.");
 				} else {
 					this.display("Articles", r.length);
-					// render all hypotheses
+					// render all hypotheses H1 - H11
 					var func;
 					_.each(_.range(1, 12), function(i) {
 						func = "h{0}".format(i);
 						this[func] && this[func](r);
 					}, this);
 				}
-
-				/*
-				// H7 article length chart
-				chart = this.subview(GoogleChartView);
-				cols = [
-					{label: 'Date', type: 'date'},
-					{label: 'Length', type: 'number'}
-				];
-				chart.renderTable('LineChart', cols, r.after_text_lengths, null, 600, "Text lengths after event");
-
-				// H9 sig dists after event chart
-				chart = this.subview(GoogleChartView);
-				cols = [
-					{label: 'Date', type: 'date'},
-					{label: 'Sd(km)', type: 'number'}
-				];
-				chart.renderTable('LineChart', cols, r.after_sig_dists, null, 600, "Signature distance after event");
-
-				// H10 local vs distant column chart
-				chart = this.subview(GoogleChartView);
-				cols = [
-					{label: 'Date', type: 'date'},
-					{label: 'Local', type: 'number'},
-					{label: 'Distant', type: 'number'}
-				];
-				chart.renderTable('LineChart', cols, r.during_local_ratios, null, 600, "Contributor localness of text survival during event");
-
-				// H11 sig dists survivors after chart
-				chart = this.subview(GoogleChartView);
-				cols = [
-					{label: 'Date', type: 'date'},
-					{label: 'Sd(km)', type: 'number'}
-				];
-				chart.renderTable('LineChart', cols, r.after_sig_dists_survivors, null, 600, "Signature distance (survivors) after event");
-				
-				*/
 				return this;
 			}
 		});
