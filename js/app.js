@@ -1883,18 +1883,23 @@ define(["jquery",
 					chart.render(values);
 				}
 			},
-			/*
 			h10: function(r) {
-				if(_.isUndefined(r.during_local_ratios)) {
-					return "n/a (no located revisions during event)."
-				}
-				var moreLocals = 0;
-				_.each(r.during_local_ratios, function(arr) {
-					moreLocals +=  arr[1] > arr[2] ? 1 : 0;
+				var results = r.has('during_local_ratios');
+				var values = _.map(results, function(res) {
+					var ratios = _.map(res.get('during_local_ratios'), function(arr) {
+						return [arr[0], arr[1] / (arr[1]+arr[2])];
+					});
+					return linearRegression(ratios).r;
 				});
-				return "{0} ({1}/{2} revisions with more locals)".format(r.during_local_ratios.length == moreLocals ? 'True' : 'False', moreLocals, r.during_local_ratios.length);
+
+				this.row(['span-one-third', 'span-two-thirds'], "H10", "For the duration of the event the article text contains more local contributions than distant ones.");
+				this.display("Proportion of local contributions staying in the text during the event", "{0} articles have locatable contributions during the event.".format(results.length));
+				if(values.length) {
+					this.column(2);
+					var chart = this.subview(BoxChartView);
+					chart.render(values);
+				}
 			},
-			*/
 			h11: function(r) {
 				var results = r.has('after_sig_dists_survivors');
 				var values = _.map(results, function(res) {
