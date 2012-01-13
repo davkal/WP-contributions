@@ -7,6 +7,9 @@ define(["jquery",
 		"wpcoordinatesparser", 
 		"countries", 
 		"bots", 
+		"order!d3",
+		"order!d3.csv",
+		"order!d3.chart",
 		'async!http://maps.google.com/maps/api/js?sensor=false',
 		'goog!visualization,1,packages:[corechart,geochart]'
 	], function($, dateFormat, _, Backbone, lz77, DateParser, CoordsParser, countries, botlist) {
@@ -606,6 +609,7 @@ define(["jquery",
 					});
 					res.early_anon_count = _.size(grouped.anon);
 					res.early_registered_count = _.size(grouped.reg);
+					res.early_author_count = res.early_anon_count + res.early_registered_count;
 				}
 
 				// H6 local/distant count (dist < mean) during event
@@ -1264,7 +1268,7 @@ define(["jquery",
 				return '<div class="page-header"><h1>{0} <small>{1}</small></h1></div>'.format(title || this.title, subtitle || this.subtitle || "");
 			},
 			column: function(n) {
-				this.body = this.$('.row > div:nth-child({0})'.format(n));
+				this.body = this.$('.row:last > div:nth-child({0})'.format(n));
 				this.form = $('form', this.body).last();
 			},
 			subview: function(cls, model) {
@@ -1625,6 +1629,46 @@ define(["jquery",
 			}
 		});
 
+		window.BoxChartView = SectionView.extend({
+			render: function(data, width) {
+				var id = _.uniqueId("box");
+				var ct = this.div(id);
+				var w = 120,
+					h = 240,
+					m = [10, 20, 20, 20]; // top right bottom left
+
+				var chart = d3.chart.box()
+					.whiskers(iqr(1.5))
+					.width(w - m[1] - m[3])
+					.height(h - m[0] - m[2]);
+				
+				var vis = d3.select("#"+id).selectAll("svg")
+					.data([data])
+					.enter().append("svg")
+					.attr("class", "box")
+					.attr("width", w)
+					.attr("height", h)
+					.append("g")
+					.attr("transform", "translate(" + m[3] + "," + m[0] + ")")
+					.call(chart);
+
+				// Returns a function to compute the interquartile range.
+				function iqr(k) {
+					return function(d, i) {
+						var q1 = d.quartiles[0],
+							q3 = d.quartiles[2],
+							iqr = (q3 - q1) * k,
+							i = -1,
+							j = d.length;
+						while (d[++i] < q1 - iqr);
+						while (d[--j] > q3 + iqr);
+						return [i, j];
+					};
+				}
+
+			}
+		});
+
 		window.GoogleChartView = SectionView.extend({
 			renderTable: function(type, cols, rows, onSelect, width, title) {
 				width = width || 800;
@@ -1760,8 +1804,8 @@ define(["jquery",
 				var locals = _.filter(located, function(l) {return l.get('creator_dist') <= l.get('mean_dist')});
 				var ratio = locals.length / located.length;
 				// text
-				var text =  "{0} ({1}% of articles with located creator)".format(ratio > 0.5 ? 'True' : 'False', Math.round(ratio * 100));
 				this.row(['span-one-third', 'span-two-thirds'], "H4", "Articles about political events are created by people in the events’ proximity.");
+				var text =  "{0} ({1}% of articles with located creator)".format(ratio > 0.5 ? 'True' : 'False', Math.round(ratio * 100));
 				this.display("Articles were created in the events' proximity", text);
 				this.column(2);
 				// chart
@@ -1777,13 +1821,23 @@ define(["jquery",
 				];
 				chart.renderTable('PieChart', cols, rows, null, 600);
 			},
-			/*
 			h5: function(r) {
-				if(_.isUndefined(r.early_anon_count)) {
-					return "n/a (no early revisions)."
+				// prepare data
+				var earlies = r.has('early_author_count');
+				var values = _.map(earlies, function(e) {
+					return e.get('early_anon_count') / e.get('early_author_count');
+				});
+
+				this.row(['span-one-third', 'span-two-thirds'], "H5", "In the beginning of the event anonymous users contribute more than registered users.");
+				this.display("Anonymous contributions in the beginning", "{0} articles have contributions in the first 3 days.".format(earlies.length));
+				if(values.length) {
+					this.column(2);
+					// chart
+					var chart = this.subview(BoxChartView);
+					chart.render(values);
 				}
-				return "{0} ({1} registered, {2} anonymous)".format(r.early_anon_count > r.early_registered_count ? 'True' : 'False', r.early_registered_count, r.early_anon_count);
 			},
+			/*
 			h6: function(r) {
 				if(_.isUndefined(r.during_local_count)) {
 					return "n/a (no revisions during event)."
