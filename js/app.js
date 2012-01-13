@@ -8,7 +8,6 @@ define(["jquery",
 		"countries", 
 		"bots", 
 		"order!d3",
-		"order!d3.csv",
 		"order!d3.chart",
 		'async!http://maps.google.com/maps/api/js?sensor=false',
 		'goog!visualization,1,packages:[corechart,geochart]'
@@ -626,6 +625,7 @@ define(["jquery",
 					res.during_local_count = _.size(grouped.local);
 					res.during_distant_count = _.size(grouped.distant);
 					res.during_no_location_count = _.size(grouped.nolocation);
+					res.during_located_count = res.during_local_count + res.during_distant_count;
 				}
 
 				// H7 size of all revs after end
@@ -1837,13 +1837,23 @@ define(["jquery",
 					chart.render(values);
 				}
 			},
-			/*
 			h6: function(r) {
-				if(_.isUndefined(r.during_local_count)) {
-					return "n/a (no revisions during event)."
+				// prepare data
+				var durings = r.has('during_located_count');
+				var values = _.map(durings, function(e) {
+					return e.get('during_local_count') / e.get('during_located_count');
+				});
+
+				this.row(['span-one-third', 'span-two-thirds'], "H6", "For the duration of the event there are more local contributions than distant ones.");
+				this.display("Proporting of local contributions during the event", "{0} articles have located contributions during the event.".format(durings.length));
+				if(values.length) {
+					this.column(2);
+					// chart
+					var chart = this.subview(BoxChartView);
+					chart.render(values);
 				}
-				return "{0} ({1} local, {2} distant, {3} unknown)".format(r.during_local_count > r.during_distant_count ? 'True' : 'False', r.during_local_count, r.during_distant_count, r.during_no_location_count);
 			},
+			/*
 			h7: function(r) {
 				if(_.isUndefined(r.after_text_lengths)) {
 					return "n/a (no revisions after event)."
