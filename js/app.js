@@ -1754,13 +1754,30 @@ define(["jquery",
 				];
 				chart.renderTable('ColumnChart', cols, rows, null, 600);
 			},
-			/*
 			h4: function(r) {
-				if(_.isUndefined(r.creator_dist)) {
-				   return "n/a (no creator location).";
-				}
-		 		return "{0} ({1} km)".format(r.creator_dist <= r.mean_dist ? 'True' : 'False', r.creator_dist.toFixed(1));
+				// prepare data
+				var located = r.has('creator_dist');
+				var locals = _.filter(located, function(l) {return l.get('creator_dist') <= l.get('mean_dist')});
+				var ratio = locals.length / located.length;
+				// text
+				var text =  "{0} ({1}% of articles with located creator)".format(ratio > 0.5 ? 'True' : 'False', Math.round(ratio * 100));
+				this.row(['span-one-third', 'span-two-thirds'], "H4", "Articles about political events are created by people in the events’ proximity.");
+				this.display("Articles were created in the events' proximity", text);
+				this.column(2);
+				// chart
+				var rows = [
+					['Local', locals.length],
+					['Distant', located.length - locals.length],
+					['Unknown', r.length - located.length]
+				];
+				var chart = this.subview(GoogleChartView);
+				var cols = [
+					{label: 'Distance', type: 'string'},
+					{label: 'Articles', type: 'number'}
+				];
+				chart.renderTable('PieChart', cols, rows, null, 600);
 			},
+			/*
 			h5: function(r) {
 				if(_.isUndefined(r.early_anon_count)) {
 					return "n/a (no early revisions)."
@@ -1923,7 +1940,7 @@ define(["jquery",
 			},
 			analyzeGroup: function(input) {
 				window.Group = new PageList;
-				window.Results = new Backbone.Collection;
+				window.Results = new Collection;
 
 				var gv = new GroupHypothesesView;
 
