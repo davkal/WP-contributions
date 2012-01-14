@@ -7,6 +7,7 @@ define(["jquery",
 		"wpcoordinatesparser", 
 		"countries", 
 		"bots", 
+		"jquery-ui",
 		"order!d3",
 		"order!d3.chart",
 		'async!http://maps.google.com/maps/api/js?sensor=false',
@@ -1967,7 +1968,39 @@ define(["jquery",
 				this.cache = $('#cache');
 				this.container = $('#content .container');
 				this.nav = $('.topbar ul.nav');
+				this.initAutocomplete();
 				this.status();
+			},
+			initAutocomplete: function() {
+				var me = this;
+				this.input.autocomplete({
+					minLength: 4,
+					source: function(request, response) {
+						$.ajax({
+							url: "http://en.wikipedia.org/w/api.php",
+							dataType: "jsonp",
+							data: {
+								action: "opensearch",
+								format: "json",
+								search: request.term
+							},
+							success: function(data) {
+								response(data[1]);
+							}
+						});
+					},
+					select: function(event, ui) {
+						if(ui.item) {
+							me.analyze(ui.item.label);
+						}
+					},
+					open: function() {
+						$(this).removeClass("ui-corner-all").addClass("ui-corner-top");
+					},
+					close: function() {
+						$(this).removeClass("ui-corner-top").addClass("ui-corner-all");
+					}
+				});
 			},
 			analyzeNext: function(todo) {
 				todo = todo || _.shuffle(Group.pluck('id'));
