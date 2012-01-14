@@ -300,6 +300,7 @@ define(["jquery",
 						this.set({ongoing: true});
 					}
 				}
+				// TODO prevent false positive, e.g. "Berlin"
 			},
 			parseLocation: function($text, $infobox) {
 				// location from template
@@ -669,7 +670,7 @@ define(["jquery",
 							after_sig_dists.push([r.get('timestamp'), r.get('sig_dist')]);
 						}
 					});
-					if(after_sig_dists.length) {
+					if(after_sig_dists.length > 1) {
 						res.after_sig_dists = after_sig_dists;
 					}
 				}
@@ -791,8 +792,8 @@ define(["jquery",
 						return token.replace("{{", "").replace("}}", "").split(",")[2];
 					}));
 					var authors = Article.get('authors');
-					var sd;
-				   	if(sd = authors.signatureDistance(editors)) {
+					var sd = authors.signatureDistance(editors);
+				   	if(_.isNumber(sd)) {
 						me.set({sig_dist_survivors: sd});
 					}
 					App.status();
@@ -847,7 +848,9 @@ define(["jquery",
 						sd += dist * count;
 					}
 				});
-				return sd / allCount;
+				if(allCount) {
+					return sd / allCount;
+				}
 			},
 			addCountry: function(author, country) {
 				country = Countries.get(country);
@@ -1563,9 +1566,9 @@ define(["jquery",
 						this.display('Location', "{0}; {1}".format(loc.get('latitude').toFixed(3), loc.get('longitude').toFixed(3)));
 					}
 					if(start) {
-						this.display('Date', dtformat(start));
+						this.display('Date', dformat(start));
 						if(start && end && end - start > 10000) {
-							this.display('End/Status', Article.has('ongoing') ? 'ongoing' : dtformat(end));
+							this.display('End/Status', Article.has('ongoing') ? 'ongoing' : dformat(end));
 						}
 					}
 				}
@@ -1928,7 +1931,7 @@ define(["jquery",
 				var r = Results;
 				this.row(['span-one-third', 'span-two-thirds']);
 				this.link(g.prefix, g.title, "http://{0}.wikipedia.org/wiki/{1}".format('en', g.title));
-				this.columns(2);
+				this.column(2);
 				if(r.length == 0) {
 					this.display("Article group empty", "No articles were found that qualify for analysis.");
 				} else {
