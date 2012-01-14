@@ -32,7 +32,7 @@ define(["jquery",
 		}
 
 		// http://trentrichardson.com/2010/04/06/compute-linear-regressions-in-javascript/
-		function linearRegression(values){
+		window.linearRegression = function(values){
 			var lr = {};
 			var n = values.length;
 			var sum_x = 0;
@@ -55,7 +55,7 @@ define(["jquery",
 
 			lr.slope = (n * sum_xy - sum_x * sum_y) / (n*sum_xx - sum_x * sum_x);
 			lr.intercept = (sum_y - lr.slope * sum_x)/n;
-			lr.r = (n*sum_xy - sum_x*sum_y)/Math.sqrt((n*sum_xx-sum_x*sum_x)*(n*sum_yy-sum_y*sum_y));
+			lr.r = (n*sum_xy - sum_x*sum_y)/Math.sqrt((n*sum_xx-sum_x*sum_x)*(n*sum_yy-sum_y*sum_y)) || 0;
 			lr.r2 = Math.pow(lr.r, 2);
 			lr.df = n - 2;
 			lr.t = lr.r * Math.sqrt(lr.df) / Math.sqrt(1 - lr.r2);
@@ -548,9 +548,11 @@ define(["jquery",
 				var revisions = this.get('revisions');
 				var languages = this.get('languages');
 				var title = this.get('title');
+				var input = this.get('input');
 
 				var res = {}, grouped, location, author, revision, username;
 				res.title = res.id = title;
+				res.input = input;
 				res.summary = this.toString();
 
 				revision = revisions.at(0);
@@ -696,6 +698,7 @@ define(["jquery",
 				// H11 [ts, SD(survivor)] for all revs after end 
 				if(gr.after) {
 					var list = revisions.sample ? _.has(gr.after, 'selected') : gr.after;
+					list = _.has(list, 'sig_dist_survivors');
 					if(list.length > 1) {
 						res.after_sig_dists_survivors = _.map(list, function(r) {
 							return [r.get('timestamp'), r.get('sig_dist_survivors')];
@@ -706,7 +709,7 @@ define(["jquery",
 				App.status();
 				this.set({results: res});
 				// caching results
-				App.setItem(Article.get('input'), res, true);
+				App.setItem(input, res, true);
 				this.trigger('complete');
 				return res;
 			}
@@ -1164,7 +1167,7 @@ define(["jquery",
 				});
 			},
 			fetchAuthors: function() {
-				var max = 10; // n < 2 * max
+				var max = 20; // n < 2 * max
 				var me = this;
 				var thorough = Article.thorough;
 				if(!thorough && !this.sample && this.length > max * 2) {
@@ -1886,6 +1889,7 @@ define(["jquery",
 				var values = _.map(results, function(res) {
 					return linearRegression(res.get('after_sig_dists')).r;
 				});
+				console.log("H9", results, values);
 
 				this.row(['span-one-third', 'span-two-thirds'], "H9", "After an event has ended, the spatial distribution of the contributors will become less local.");
 				this.display("Correlation between article age and localness", "{0} articles have contributions after the event.".format(results.length));
@@ -1903,6 +1907,7 @@ define(["jquery",
 					});
 					return linearRegression(ratios).r;
 				});
+				console.log("H10", results, values);
 
 				this.row(['span-one-third', 'span-two-thirds'], "H10", "For the duration of the event the article text contains more local contributions than distant ones.");
 				this.display("Proportion of local contributions staying in the text during the event", "{0} articles have locatable contributions during the event.".format(results.length));
@@ -1917,6 +1922,7 @@ define(["jquery",
 				var values = _.map(results, function(res) {
 					return linearRegression(res.get('after_sig_dists_survivors')).r;
 				});
+				console.log("H11", results, values);
 
 				this.row(['span-one-third', 'span-two-thirds'], "H11", "After an event has ended, the spatial distribution of the surviving contributions will become less local.");
 				this.display("Correlation between article age and localness", "{0} articles have contributions after the event.".format(results.length));
@@ -1958,7 +1964,7 @@ define(["jquery",
 			el: $("body"),
 			details: true,
 			events: {
-				"click #clear": "clear",
+				"click #render": "renderResults",
 				"click #cache": "clearCache",
 				"click #analyze": "analyzeOnClick",
 				"click .example": "analyzeExample",
@@ -1966,13 +1972,24 @@ define(["jquery",
 			},
 			initialize: function() {
 				this.input = this.$("#input");
+				this.$render = this.$("#render");
 				this.$special = this.$("#special");
 				this.statusEl = $('#status');
 				this.cache = $('#cache');
 				this.container = $('#content .container');
 				this.nav = $('.topbar ul.nav');
 				this.initAutocomplete();
+				this.checkCacheForGroup();
 				this.status();
+			},
+			checkCacheForGroup: function() {
+				var group = this.getItem('group');
+				if(group) {
+					window.Group = new PageList(group.items);
+					Group.title = group.title;
+					Group.prefix = group.prefix;
+					this.$render.removeClass('disabled');
+				}
 			},
 			initAutocomplete: function() {
 				var me = this;
@@ -2005,20 +2022,47 @@ define(["jquery",
 					}
 				});
 			},
-			analyzeNext: function(todo) {
-				todo = todo || _.shuffle(Group.pluck('id'));
+			renderResults: function() {
+				if(!Group) {
+					App.error('No group results cached.');
+					return;
+				}
+				// get results from cache
+				var key, result;
+				window.Results = new Collection;
+				for(var i = 0; i < localStorage.length; i++) {
+					key = localStorage.key(i);
+					if(!isNaN(parseInt(key))) {
+						Results.add(App.getItem(key));
+					}
+				}
+				// render
+				var gv = new GroupHypothesesView;
+				gv.render();
+
+			},
+			analyzeNext: function(todo, count) {
+				if(!todo) {
+					todo = _.shuffle(Group.pluck('id')).slice(App.thorough ? 0 : -25);
+					count = todo.length;
+					// cache group sample
+					var list = _.map(todo, function(t) {
+						return Group.get(t).toJSON();
+					});
+					App.setItem('group', {title: Group.title, prefix: Group.prefix, items: list}, true);
+				}
 				var delay = Group.length == todo.length ? 0 : GROUP_DELAY;
 				var next = todo.pop();
 				var me = this;
 				if(next) {
-					App.status('Group progress {0}/{1}'.format(Group.length - todo.length, Group.length));
+					App.status('Group progress {0}/{1}'.format(count - todo.length, count));
 					_.debounce(function() {
 						var cached = App.getItem(next);
 						if(cached) {
 							if(!_.isEmpty(cached)) {
 								Results.add(cached);
 							}
-							me.analyzeNext(todo);
+							me.analyzeNext(todo, count);
 						} else {
 							var article = me.analyzeArticle(next);
 							article.bind('complete', function() {
@@ -2026,7 +2070,7 @@ define(["jquery",
 								if(results) {
 									Results.add(results);
 								}
-								me.analyzeNext(todo);
+								me.analyzeNext(todo, count);
 							});
 						}
 					}, delay)();
@@ -2114,7 +2158,7 @@ define(["jquery",
 			},
 			setItem: function(key, value, nocheck) {
 				value = JSON.stringify(value);
-				if(nocheck || value.length < CACHE_LIMIT) {
+				if(nocheck || !App.group && value.length < CACHE_LIMIT) {
 					var s = lz77.compress(value);
 					try { 
 						localStorage.setItem(key, s);
