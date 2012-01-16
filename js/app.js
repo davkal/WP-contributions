@@ -2195,6 +2195,7 @@ define(["jquery",
 			clearCache: function() {
 				localStorage.clear();
 				this.status();
+				this.checkCacheForGroup();
 			},
 			setItem: function(key, value, nocheck) {
 				value = JSON.stringify(value);
