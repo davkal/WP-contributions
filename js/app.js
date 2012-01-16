@@ -743,8 +743,11 @@ define(["jquery",
 				var attr = {};
 				if(res.parse) {
 					var countries = [], candidate;
-					// TODO use article candidate mechanism
+					// TODO use MainArticle's candidate mechanism
 					// TRY load first revisions and check anon comments for "IP"  (e.g. User:TimBentley)
+					// TRY check first revision texts, usually more infoboxes present
+					// TRY check for the likes of "This user is a member of the Virginia WikiProject"
+					// TRY authored pages with geotags (you are where you edit)
 					// TRY or sequence (anon -> user) with comment "oops this is my IP" (e.g. User:Master%26Expert)
 					_.each(res.parse.links, function(l) {
 						if(candidate = Countries.isCountry(l['*'])) {
@@ -1964,8 +1967,8 @@ define(["jquery",
 					this.column(2);
 					this.textarea('Articles analyzed ({0})'.format(r.length), r.pluck('title').join('\n'));
 					this.column(3);
-					var relevant = r.has('summary');
-					this.textarea('Articles relevant ({0})'.format(relevant.length), _.pluck(relevant, 'title').join('\n'));
+					var relevant = _.map(r.has('summary'), function(a) { return a.get('title'); });
+					this.textarea('Articles relevant ({0})'.format(relevant.length), relevant.join('\n'));
 
 					// render all hypotheses H1 - H11
 					var func;
