@@ -474,12 +474,6 @@ define(["jquery",
 		});
 
 		window.MainArticle = Page.extend({
-			defaults: {
-				lang: 'en',
-				group: false,
-				thorough: false,
-				full_text: true
-			},
 			initialize: function() {
 				var authors = new Authorship;
 				var revisions = new RevisionCollection;
@@ -493,7 +487,7 @@ define(["jquery",
 				this.bind('done', this.results, this);
 				this.bind('additional', function() {
 					// skip analysis of irrelevant articles when in group mode
-					if(!this.get('group') || this.relevant()) {
+					if(!this.has('group') || this.relevant()) {
 						authors.retrieve();
 					} else {
 						this.trigger('done', this);
@@ -819,7 +813,6 @@ define(["jquery",
 				   	if(_.isNumber(sd)) {
 						me.set({sig_dist_survivors: sd});
 					}
-					App.status();
 					me.set({authors: editors});
 					me.trigger('authors', me);
 				};
