@@ -2018,6 +2018,7 @@ define(["jquery",
 					window.Group = new PageList(group.items);
 					Group.title = group.title;
 					Group.prefix = group.prefix;
+					this.$continue.attr('title', "Continue group analysis: {0}".format(group.title));
 					// get results from cache, result is present when key with article ID exists
 					var key, result;
 					window.Results = new Collection;
