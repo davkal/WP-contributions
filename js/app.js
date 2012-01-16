@@ -556,9 +556,10 @@ define(["jquery",
 				return true;
 			},
 			results: function() {
+				var id = this.get('input');
 				if(this.has('results') || !this.relevant()) {
 					console.log("Article does not qualify:", this.get("title"));
-					App.setItem(this.get('input'), {});
+					App.setItem(id, {id: id}, true);
 					this.trigger('complete');
 					return this.get('results') || null;
 				}
@@ -567,11 +568,10 @@ define(["jquery",
 				var revisions = this.get('revisions');
 				var languages = this.get('languages');
 				var title = this.get('title');
-				var input = this.get('input');
 
 				var res = {}, grouped, location, author, revision, username;
-				res.title = res.id = title;
-				res.input = input;
+				res.title = title;
+				res.input = res.id = id;
 				res.summary = this.toString();
 
 				revision = revisions.at(0);
@@ -728,7 +728,7 @@ define(["jquery",
 				App.status();
 				this.set({results: res});
 				// caching results
-				App.setItem(input, res, true);
+				App.setItem(id, res, true);
 				this.trigger('complete');
 				return res;
 			}
@@ -1971,6 +1971,7 @@ define(["jquery",
 			}
 		});
 		
+		// TODO qualification counter for each H
 		// TODO make Locations global for re-use (user pages)
 
 		// NICE TO HAVE
@@ -1984,7 +1985,8 @@ define(["jquery",
 			el: $("body"),
 			details: true,
 			events: {
-				"click #render": "renderResults",
+				"click #renderResults": "renderResults",
+				"click #continueResults": "continueResults",
 				"click #cache": "clearCache",
 				"click #analyze": "analyzeOnClick",
 				"click .example": "analyzeExample",
@@ -1992,7 +1994,8 @@ define(["jquery",
 			},
 			initialize: function() {
 				this.input = this.$("#input");
-				this.$render = this.$("#render");
+				this.$render = this.$("#renderResults");
+				this.$continue = this.$("#continueResults");
 				this.$special = this.$("#special");
 				this.statusEl = $('#status');
 				this.cache = $('#cache');
@@ -2008,8 +2011,26 @@ define(["jquery",
 					window.Group = new PageList(group.items);
 					Group.title = group.title;
 					Group.prefix = group.prefix;
-					this.$render.removeClass('disabled');
+					// get results from cache, result is present when key with article ID exists
+					var key, result;
+					window.Results = new Collection;
+					for(var i = 0; i < localStorage.length; i++) {
+						key = localStorage.key(i);
+						if(!isNaN(parseInt(key))) {
+							Results.add(this.getItem(key));
+						}
+					}
+					this.groupStatus();
 				}
+			},
+			groupStatus: function() {
+				var total = Group.length;
+				var done = Results.length;
+				var relevant = Results.has('summary');
+				this.$continue.text("Continue {0}/{1}".format(done, total));
+				this.$render.text("{0} results".format(relevant.length));
+				this.$render.toggleClass('disabled', !done);
+				this.$continue.toggleClass('disabled', !done);
 			},
 			initAutocomplete: function() {
 				var me = this;
@@ -2043,47 +2064,32 @@ define(["jquery",
 					}
 				});
 			},
+			continueResults: function() {
+				var todo = _.difference(Group.pluck('id'), Results.pluck('id'));
+				this.analyzeNext(todo);
+			},
 			renderResults: function() {
-				if(!Group) {
-					App.error('No group results cached.');
-					return;
-				}
-				// get results from cache
-				var key, result;
-				window.Results = new Collection;
-				for(var i = 0; i < localStorage.length; i++) {
-					key = localStorage.key(i);
-					if(!isNaN(parseInt(key))) {
-						Results.add(App.getItem(key));
-					}
-				}
-				// render
 				var gv = new GroupHypothesesView;
 				gv.render();
-
 			},
-			analyzeNext: function(todo, count) {
+			analyzeNext: function(todo) {
 				if(!todo) {
-					todo = _.shuffle(Group.pluck('id')).slice(App.thorough ? 0 : -100);
-					count = todo.length;
-					// cache group sample
-					var list = _.map(todo, function(t) {
-						return Group.get(t).toJSON();
-					});
-					App.setItem('group', {title: Group.title, prefix: Group.prefix, items: list}, true);
+					todo = _.shuffle(Group.pluck('id'));
+					// cache group for stop/continue
+					App.setItem('group', {title: Group.title, prefix: Group.prefix, items: Group.toJSON}, true);
 				}
 				var delay = Group.length == todo.length ? 0 : GROUP_DELAY;
 				var next = todo.pop();
 				var me = this;
 				if(next) {
-					App.status('Group progress {0}/{1}'.format(count - todo.length, count));
+					this.groupStatus();
 					_.debounce(function() {
 						var cached = App.getItem(next);
 						if(cached) {
-							if(!_.isEmpty(cached)) {
+							if(cached.summary) {
 								Results.add(cached);
 							}
-							me.analyzeNext(todo, count);
+							me.analyzeNext(todo);
 						} else {
 							var article = me.analyzeArticle(next);
 							article.bind('complete', function() {
@@ -2091,7 +2097,7 @@ define(["jquery",
 								if(results) {
 									Results.add(results);
 								}
-								me.analyzeNext(todo, count);
+								me.analyzeNext(todo);
 							});
 						}
 					}, delay)();
@@ -2103,6 +2109,8 @@ define(["jquery",
 			analyzeGroup: function(input) {
 				window.Group = new PageList;
 				window.Results = new Collection;
+				this.groupStatus();
+				this.clearCache();
 
 				var gv = new GroupHypothesesView;
 
@@ -2176,6 +2184,7 @@ define(["jquery",
 			}, 1000),
 			clearCache: function() {
 				localStorage.clear();
+				this.status();
 			},
 			setItem: function(key, value, nocheck) {
 				value = JSON.stringify(value);
