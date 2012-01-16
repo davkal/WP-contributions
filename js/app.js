@@ -31,7 +31,7 @@ define(["jquery",
 			return $.format.date(new Date(d), "yyyy-MM-dd");
 		}
 
-		// http://trentrichardson.com/2010/04/06/compute-linear-regressions-in-javascript/
+		// Based on http://trentrichardson.com/2010/04/06/compute-linear-regressions-in-javascript/
 		window.linearRegression = function(values){
 			var lr = {};
 			var n = values.length;
@@ -557,17 +557,18 @@ define(["jquery",
 			},
 			results: function() {
 				var id = this.get('input');
+				var title = this.get('title');
+
 				if(this.has('results') || !this.relevant()) {
-					console.log("Article does not qualify:", this.get("title"));
-					App.setItem(id, {id: id}, true);
+					console.log("Article does not qualify:", title);
+					App.setItem(id, {id: id, title: title}, true);
 					this.trigger('complete');
 					return this.get('results') || null;
 				}
-				App.status('Calculating results...');
+
 				var authors = this.get('authors');
 				var revisions = this.get('revisions');
 				var languages = this.get('languages');
-				var title = this.get('title');
 
 				var res = {}, grouped, location, author, revision, username;
 				res.title = title;
@@ -1606,9 +1607,11 @@ define(["jquery",
 				var table = new google.visualization.DataTable();
 				table.addColumn('string', 'Region');
 				table.addColumn('number', 'Count');
-				table.addRows(rows);
-				var geoChart = new google.visualization.GeoChart(this.div(_.uniqueId("geoChart")));
-				geoChart.draw(table);
+				if(rows && rows.length) {
+					table.addRows(rows);
+					var geoChart = new google.visualization.GeoChart(this.div(_.uniqueId("geoChart")));
+					geoChart.draw(table);
+				}
 			},
 			render: function() {
 				var locations = Article.get('locations');
@@ -1953,13 +1956,17 @@ define(["jquery",
 			render: function() {
 				var g = Group;
 				var r = Results;
-				this.row(['span-one-third', 'span-two-thirds']);
+				this.row(['span-one-third', 'span-one-third', 'span-one-third']);
 				this.link(g.prefix, g.title, "http://{0}.wikipedia.org/wiki/{1}".format('en', g.title));
-				this.column(2);
 				if(r.length == 0) {
 					this.display("Article group empty", "No articles were found that qualify for analysis.");
 				} else {
-					this.display("Articles", r.length);
+					this.column(2);
+					this.textarea('Articles analyzed ({0})'.format(r.length), r.pluck('title').join('\n'));
+					this.column(3);
+					var relevant = r.has('summary');
+					this.textarea('Articles relevant ({0})'.format(relevant.length), _.pluck(relevant, 'title').join('\n'));
+
 					// render all hypotheses H1 - H11
 					var func;
 					_.each(_.range(1, 12), function(i) {
@@ -2076,7 +2083,7 @@ define(["jquery",
 				if(!todo) {
 					todo = _.shuffle(Group.pluck('id'));
 					// cache group for stop/continue
-					App.setItem('group', {title: Group.title, prefix: Group.prefix, items: Group.toJSON}, true);
+					App.setItem('group', {title: Group.title, prefix: Group.prefix, items: Group.toJSON()}, true);
 				}
 				var delay = Group.length == todo.length ? 0 : GROUP_DELAY;
 				var next = todo.pop();
