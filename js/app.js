@@ -2138,8 +2138,8 @@ define(["jquery",
 			analyzeArticle: function(input) {
 				if(window.Article) {
 					Article.unbind();
-					this.clear();
 				}
+				this.clear();
 
 				window.Article = new MainArticle({group: this.group});
 				var authors = Article.get('authors');
