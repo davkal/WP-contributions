@@ -1992,8 +1992,8 @@ define(["jquery",
 			el: $("body"),
 			details: true,
 			events: {
-				"click #renderResults": "renderResults",
-				"click #continueResults": "continueResults",
+				"click #renderGroup": "renderGroup",
+				"click #continueGroup": "continueGroup",
 				"click #cache": "clearCache",
 				"click #analyze": "analyzeOnClick",
 				"click .example": "analyzeExample",
@@ -2001,8 +2001,8 @@ define(["jquery",
 			},
 			initialize: function() {
 				this.input = this.$("#input");
-				this.$render = this.$("#renderResults");
-				this.$continue = this.$("#continueResults");
+				this.$render = this.$("#renderGroup");
+				this.$continue = this.$("#continueGroup");
 				this.$special = this.$("#special");
 				this.statusEl = $('#status');
 				this.cache = $('#cache');
@@ -2018,7 +2018,6 @@ define(["jquery",
 					window.Group = new PageList(group.items);
 					Group.title = group.title;
 					Group.prefix = group.prefix;
-					this.$continue.attr('title', "Continue group analysis: {0}".format(group.title));
 					// get results from cache, result is present when key with article ID exists
 					var key, result, article;
 					for(var i = 0; i < localStorage.length; i++) {
@@ -2035,6 +2034,7 @@ define(["jquery",
 				var done = _.size(Group.has('analyzed'));
 				var relevant = _.size(_.compact(Group.pluck('analyzed')));
 				this.$continue.text("Continue {0}/{1}".format(done, total));
+				this.$continue.attr('title', "Continue group analysis: {0}".format(Group.title));
 				this.$render.text("{0} results".format(relevant));
 				this.$render.toggleClass('disabled', !done);
 				this.$continue.toggleClass('disabled', !done);
@@ -2071,11 +2071,11 @@ define(["jquery",
 					}
 				});
 			},
-			continueResults: function() {
+			continueGroup: function() {
 				var todo = Group.filter(function(a) { return a.has('analyzed'); });
 				this.analyzeNext(_.invoke(todo, 'get', 'id'));
 			},
-			renderResults: function() {
+			renderGroup: function() {
 				var gv = new GroupHypothesesView;
 				gv.render();
 			},
