@@ -567,7 +567,7 @@ define(["jquery",
 				var revisions = this.get('revisions');
 				var languages = this.get('languages');
 
-				var grouped, location, author, revision, username;
+				var grouped, location, author, revision, username, list;
 				res.input = id;
 				res.analyzed = true;
 				res.summary = this.toString();
@@ -592,15 +592,19 @@ define(["jquery",
 
 				// H1,H2 timedelta created - started
 				res.delta = (res.created - res.start) / 1000 / 60 / 60 / 24; // in days
+				res.h1 = res.h2 = true;
 
 				// H3 first language
 				res.first_lang = languages.first().get('lang');
+				res.h3 = true;
 
 				// H4 distance of creator
 				author = authors.get(revision.get('user'));
 				if(author && author.has('location')) {
 					res.creator_dist = author.get('location').get('distance');
+					res.h4 = true;
 				} else {
+					res.h4 = false;
 					console.log("No creator location.", title, revision.get('user'));
 				}
 
@@ -617,17 +621,15 @@ define(["jquery",
 				res.beginning = new Date(res.start);
 				res.beginning.setDate(res.beginning.getDate() + 3);
 				// beginning is part of during
+				var earlies;
 				if(gr.during || gr.after) {
-					var earlies = _.filter(_.compact(_.union(gr.during, gr.after)), function(r) {
+					earlies = _.filter(_.compact(_.union(gr.during, gr.after)), function(r) {
 						return new Date(r.get('timestamp')) < res.beginning;
 					});
-					if(earlies.length) {
-						gr.beginning = earlies;
-					}
 				}
 
 				// H5 anon/regs count beginning
-				if(gr.beginning) {
+				if(_.size(earlies)) {
 					grouped = _.groupBy(gr.beginning, function(r) {
 						username = r.get('user');
 						if(author = authors.get(username)) {
@@ -639,6 +641,7 @@ define(["jquery",
 					res.early_registered_count = _.size(grouped.reg);
 					res.early_author_count = res.early_anon_count + res.early_registered_count;
 				}
+				res.h5 = res.early_author_count >= 10;
 
 				// H6 local/distant count (dist < mean) during event
 				if(gr.during) {
@@ -656,16 +659,18 @@ define(["jquery",
 					res.during_no_location_count = _.size(grouped.nolocation);
 					res.during_located_count = res.during_local_count + res.during_distant_count;
 				}
+				res.h6 = res.during_located_count >= 10;
 
 				// H7 size of all revs after end
 				if(gr.after) {
-					var list = revisions.sample ? _.has(gr.after, 'selected') : gr.after;
+					list = revisions.sample ? _.has(gr.after, 'selected') : gr.after;
 					if(list.length > 1) {
 						res.after_text_lengths = _.map(list, function(r) {
 							return [r.get('timestamp'), r.get('length')];
 						});
 					}
 				}
+				res.h7 = res.after_text_lengths && res.after_text_lengths.length >= 10;
 				
 				// H8 anon/regs count after end
 				if(gr.after) {
@@ -680,23 +685,25 @@ define(["jquery",
 					res.after_registered_count = _.size(grouped.reg);
 					res.after_author_count = res.after_anon_count + res.after_registered_count;
 				}
+				res.h8 = res.after_author_count && res.after_author_count >= 10;
 
 				// H9 [ts, SD(all)] for all revs after end 
 				if(gr.after) {
-					var after_sig_dists = [];
+					list = [];
 					_.each(gr.after, function(r) {
 						if(r.has('sig_dist')) {
-							after_sig_dists.push([r.get('timestamp'), r.get('sig_dist')]);
+							list.push([r.get('timestamp'), r.get('sig_dist')]);
 						}
 					});
-					if(after_sig_dists.length > 1) {
-						res.after_sig_dists = after_sig_dists;
+					if(list.length > 1) {
+						res.after_sig_dists = list;
 					}
 				}
+				res.h9 = res.after_sig_dists && res.after_sig_dists.length >= 10;
 
 				// H10 for all revs during count local and distant survivors
 				if(gr.during) {
-					var list = revisions.sample ? _.has(gr.during, 'selected') : gr.during;
+					list = revisions.sample ? _.has(gr.during, 'selected') : gr.during;
 					if(list.length > 1) {
 						res.during_local_ratios = _.map(list, function(r) {
 							grouped = _.groupBy(r.get('authors'), function(username) {
@@ -711,10 +718,11 @@ define(["jquery",
 						});
 					}
 				}
+				res.h10 = res.during_local_ratios && res.during_local_ratios.length >= 10;
 
 				// H11 [ts, SD(survivor)] for all revs after end 
 				if(gr.after) {
-					var list = revisions.sample ? _.has(gr.after, 'selected') : gr.after;
+					list = revisions.sample ? _.has(gr.after, 'selected') : gr.after;
 					list = _.has(list, 'sig_dist_survivors');
 					if(list.length > 1) {
 						res.after_sig_dists_survivors = _.map(list, function(r) {
@@ -722,6 +730,7 @@ define(["jquery",
 						});
 					}
 				}
+				res.h11 = res.after_sig_dists_survivors && res.after_sig_dists_survivors.length >= 10;
 
 				App.status();
 				this.set({results: res});
@@ -1769,13 +1778,11 @@ define(["jquery",
 
 		window.GroupHypothesesView = SectionView.extend({
 			title: "Hypotheses",
-			h1: function(r) {
-				// prepare data
-				var deltas = _.compact(r.pluck('delta'));
-				var delta = _.sum(deltas) / deltas.length;
-				// text
-				var text =  delta ? "{0} ({1})".format(delta < 3 ? 'True' : 'False', delta.toFixed(1)) : "n/a (no start date).";
-				this.row(['span-one-third', 'span-two-thirds'], "H1", "Articles are created with only a short delay after the start date of the event.");
+			h1: function(results, title, subtitle) {
+				var deltas = _.invoke(results, 'get', 'delta');
+				var avg = _.sum(deltas) / deltas.length;
+				var text = "{0} ({1} days on average)".format(avg < 3 ? 'True' : 'False', avg.toFixed(1));
+				this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 				this.display('Articles were created in the first 3 days', text);
 				this.column(2);
 				// chart
@@ -1793,13 +1800,15 @@ define(["jquery",
 				];
 				chart.renderTable('ColumnChart', cols, rows, null, 600);
 			},
-			h2: function(r) {
-				var rows = r.map(function(res) {
-					return [res.get('created'), res.get('delta')];
+			h2: function(results, title, subtitle) {
+				var rows = _.map(results, function(r) {
+					return [r.get('created'), r.get('delta')];
 				});
-				var text = "Scatter plot of all delays between event start date and date of earliest revision.";
-				this.row(['span-one-third', 'span-two-thirds'], "H2", "The more recent an article, the shorter is the delay between the event start and article creation.");
-				this.display('Articles were created in the first 3 days', text);
+				this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
+				var lr = linearRegression(rows);
+				var text = "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r < 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
+				this.display('Recent articles have a shorter delay', text);
+				this.display('Scatter plot', "All delays between event start date and date of earliest revision.");
 				this.column(2);
 				var chart = this.subview(GoogleChartView);
 				var cols = [
@@ -1808,12 +1817,12 @@ define(["jquery",
 				];
 				chart.renderTable('ScatterChart', cols, rows, null, 600);
 			},
-			h3: function(r) {
-				var langs = _.compact(r.pluck('first_lang'));
+			h3: function(results, title, subtitle) {
+				var langs = _.invoke(results, 'get', 'first_lang');
 				var english = _.filter(langs, function(l) {return l == 'en'});
 				var ratio = english.length / langs.length;
 				var text =  "{0} ({1}%)".format(ratio > 0.5 ? 'True' : 'False', Math.round(ratio * 100));
-				this.row(['span-one-third', 'span-two-thirds'], "H3", "Articles are being created first in the English Wikipedia.");
+				this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 				this.display('Articles were created in the English Wikipedia first', text);
 				this.column(2);
 				var rows = _.groupBy(langs, function(l) { return l });
@@ -1827,18 +1836,17 @@ define(["jquery",
 				];
 				chart.renderTable('ColumnChart', cols, rows, null, 600);
 			},
-			h4: function(r) {
-				var located = r.has('creator_dist');
-				var locals = _.filter(located, function(l) {return l.get('creator_dist') <= l.get('mean_dist')});
-				var ratio = locals.length / located.length;
-				this.row(['span-one-third', 'span-two-thirds'], "H4", "Articles about political events are created by people in the events’ proximity.");
+			h4: function(results, title, subtitle) {
+				var locals = _.filter(results, function(l) {return l.get('creator_dist') <= l.get('mean_dist')});
+				var ratio = locals.length / results.length;
+				this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 				var text =  "{0} ({1}% of articles with located creator)".format(ratio > 0.5 ? 'True' : 'False', Math.round(ratio * 100));
 				this.display("Articles were created in the events' proximity", text);
 				this.column(2);
 				var rows = [
 					['Local', locals.length],
-					['Distant', located.length - locals.length],
-					['Unknown', r.length - located.length]
+					['Distant', results.length - locals.length],
+					['Unknown', Group.length - results.length]
 				];
 				var chart = this.subview(GoogleChartView);
 				var cols = [
@@ -1847,13 +1855,12 @@ define(["jquery",
 				];
 				chart.renderTable('PieChart', cols, rows, null, 600);
 			},
-			h5: function(r) {
-				var results = r.has('early_author_count');
+			h5: function(results, title, subtitle) {
 				var values = _.map(results, function(e) {
 					return e.get('early_anon_count') / e.get('early_author_count');
 				});
 
-				this.row(['span-one-third', 'span-two-thirds'], "H5", "In the beginning of the event anonymous users contribute more than registered users.");
+				this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 				this.display("Anonymous contributions in the beginning", "{0} articles have contributions in the first 3 days.".format(results.length));
 				if(values.length) {
 					this.column(2);
@@ -1861,13 +1868,12 @@ define(["jquery",
 					chart.render(values);
 				}
 			},
-			h6: function(r) {
-				var results = r.has('during_located_count');
+			h6: function(results, title, subtitle) {
 				var values = _.map(results, function(e) {
 					return e.get('during_local_count') / e.get('during_located_count');
 				});
 
-				this.row(['span-one-third', 'span-two-thirds'], "H6", "For the duration of the event there are more local contributions than distant ones.");
+				this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 				this.display("Proporting of local contributions during the event", "{0} articles have located contributions during the event.".format(results.length));
 				if(values.length) {
 					this.column(2);
@@ -1875,13 +1881,12 @@ define(["jquery",
 					chart.render(values);
 				}
 			},
-			h7: function(r) {
-				var results = r.has('after_text_lengths');
+			h7: function(results, title, subtitle) {
 				var values = _.map(results, function(res) {
 					return linearRegression(res.get('after_text_lengths')).r;
 				});
 
-				this.row(['span-one-third', 'span-two-thirds'], "H7", "Articles of a political event that has ended will continuously shrink in size.");
+				this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 				this.display("Correlation between article age and text length", "{0} articles have contributions after the event.".format(results.length));
 				if(values.length) {
 					this.column(2);
@@ -1889,13 +1894,12 @@ define(["jquery",
 					chart.render(values);
 				}
 			},
-			h8: function(r) {
-				var results = r.has('after_author_count');
+			h8: function(results, title, subtitle) {
 				var values = _.map(results, function(e) {
 					return e.get('after_anon_count') / e.get('after_author_count');
 				});
 
-				this.row(['span-one-third', 'span-two-thirds'], "H8", "After an event has ended, there will be more contributions from registered users than from anonymous ones.");
+				this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 				this.display("Anonymous contributions in the end", "{0} articles have contributions after the event.".format(results.length));
 				if(values.length) {
 					this.column(2);
@@ -1903,13 +1907,12 @@ define(["jquery",
 					chart.render(values);
 				}
 			},
-			h9: function(r) {
-				var results = r.has('after_sig_dists');
+			h9: function(results, title, subtitle) {
 				var values = _.map(results, function(res) {
 					return linearRegression(res.get('after_sig_dists')).r;
 				});
 
-				this.row(['span-one-third', 'span-two-thirds'], "H9", "After an event has ended, the spatial distribution of the contributors will become less local.");
+				this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 				this.display("Correlation between article age and localness", "{0} articles have contributions after the event.".format(results.length));
 				if(values.length) {
 					this.column(2);
@@ -1917,8 +1920,7 @@ define(["jquery",
 					chart.render(values);
 				}
 			},
-			h10: function(r) {
-				var results = r.has('during_local_ratios');
+			h10: function(results, title, subtitle) {
 				var values = _.map(results, function(res) {
 					var ratios = _.map(res.get('during_local_ratios'), function(arr) {
 						return [arr[0], arr[1] / (arr[1]+arr[2])];
@@ -1926,7 +1928,7 @@ define(["jquery",
 					return linearRegression(ratios).r;
 				});
 
-				this.row(['span-one-third', 'span-two-thirds'], "H10", "For the duration of the event the article text contains more local contributions than distant ones.");
+				this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 				this.display("Proportion of local contributions staying in the text during the event", "{0} articles have locatable contributions during the event.".format(results.length));
 				if(values.length) {
 					this.column(2);
@@ -1934,13 +1936,12 @@ define(["jquery",
 					chart.render(values);
 				}
 			},
-			h11: function(r) {
-				var results = r.has('after_sig_dists_survivors');
+			h11: function(results, title, subtitle) {
 				var values = _.map(results, function(res) {
 					return linearRegression(res.get('after_sig_dists_survivors')).r;
 				});
 
-				this.row(['span-one-third', 'span-two-thirds'], "H11", "After an event has ended, the spatial distribution of the surviving contributions will become less local.");
+				this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 				this.display("Correlation between article age and localness", "{0} articles have contributions after the event.".format(results.length));
 				if(values.length) {
 					this.column(2);
@@ -1956,7 +1957,7 @@ define(["jquery",
 				if(results.length == 0) {
 					this.display("Article group empty", "No articles were found that qualify for analysis.");
 				} else {
-					var list;
+					var list, func, title;
 					var grouped = _.groupBy(results, function(a) {
 						return a.get('analyzed') ? 'relevant' : 'skipped';
 					});
@@ -1968,17 +1969,49 @@ define(["jquery",
 					this.textarea('Articles skipped ({0})'.format(_.size(list)), list.join('\n'));
 
 					// render all hypotheses H1 - H11
-					var func;
-					_.each(_.range(1, 12), function(i) {
-						func = "h{0}".format(i);
-						this[func] && this[func](g);
+					var hs = [
+						// H1
+						"Articles are created with only a short delay after the start date of the event.",
+						// H2
+						"The more recent an article, the shorter is the delay between the event start and article creation.",
+						// H3
+						"Articles are being created first in the English Wikipedia.",
+						// H4
+						"Articles about political events are created by people in the events’ proximity.",
+						// H5
+						"In the beginning of the event anonymous users contribute more than registered users.",
+						// H6
+						"For the duration of the event there are more local contributions than distant ones.",
+						// H7
+						"Articles of a political event that has ended will continuously shrink in size.",
+						// H8
+						"After an event has ended, there will be more contributions from registered users than from anonymous ones.",
+						// H9
+						"After an event has ended, the spatial distribution of the contributors will become less local.",
+						// H10
+						"For the duration of the event the article text contains more local contributions than distant ones.",
+						// H11
+						"After an event has ended, the spatial distribution of the surviving contributions will become less local."
+					];
+					_.each(hs, function(subtitle, i) {
+						func = "h{0}".format(i + 1);
+						// pre-filtering for relevant results for each H
+						list = g.filter(function(a) {
+							return a.get(func);
+						});
+						title = func.toUpperCase();
+						if(list.length > 1) {
+							this[func] && this[func](list, title, subtitle);
+						} else {
+							this.row(['span-two-thirds', 'span-one-third'], title, subtitle);
+							this.display("Not enough articles", "{0} valid results in {1} analyzed articles.".format(list.length, _.size(results)));
+						}
 					}, this);
 				}
 				return this;
 			}
 		});
 		
-		// TODO qualification counter for each H
 		// TODO make Locations global for re-use (user pages)
 
 		// NICE TO HAVE
