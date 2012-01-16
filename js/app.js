@@ -2184,14 +2184,14 @@ define(["jquery",
 				}
 				return Article;
 			},
-			status: _.throttle(function(msg) {
-				if(!msg) {
-					msg = "Ready.";
-					var size = JSON.stringify(localStorage).length / 1024 / 1024;
-					this.cache.text("Cache {0} MB".format(size.toFixed(2)));
-				}
-				this.statusEl.text(msg);
-			}, 1000),
+			status: function(msg) {
+				this.statusEl.text(msg || "Ready.");
+				this.cacheStatus();
+			},
+			cacheStatus: _.throttle(function() {
+				var size = JSON.stringify(localStorage).length / 1024 / 1024;
+				this.cache.text("Cache {0} MB".format(size.toFixed(2)));
+			}, 5000),
 			clearCache: function() {
 				localStorage.clear();
 				this.status();
