@@ -550,21 +550,26 @@ define(["jquery",
 			results: function() {
 				var id = this.get('input');
 				var title = this.get('title');
+				var res = {
+					id: id,
+					title: title,
+					analyzed: false // false means irrelevant
+				};
 
 				if(this.has('results') || !this.relevant()) {
 					console.log("Article does not qualify:", title);
-					App.setItem(id, {id: id, title: title}, true);
+					App.setItem(id, res, true);
 					this.trigger('complete');
-					return this.get('results') || null;
+					return this.get('results') || res;
 				}
 
 				var authors = this.get('authors');
 				var revisions = this.get('revisions');
 				var languages = this.get('languages');
 
-				var res = {}, grouped, location, author, revision, username;
-				res.title = title;
-				res.input = res.id = id;
+				var grouped, location, author, revision, username;
+				res.input = id;
+				res.analyzed = true;
 				res.summary = this.toString();
 
 				revision = revisions.at(0);
@@ -1945,15 +1950,15 @@ define(["jquery",
 			},
 			render: function() {
 				var g = Group;
-				var r = Results;
+				var results = g.has('analyzed');
 				this.row(['span-one-third', 'span-one-third', 'span-one-third']);
 				this.link(g.prefix, g.title, "http://{0}.wikipedia.org/wiki/{1}".format('en', g.title));
-				if(r.length == 0) {
+				if(results.length == 0) {
 					this.display("Article group empty", "No articles were found that qualify for analysis.");
 				} else {
 					var list;
-					var grouped = r.groupBy(function(a) {
-						return a.has('summary') ? 'relevant' : 'skipped';
+					var grouped = _.groupBy(results, function(a) {
+						return a.get('analyzed') ? 'relevant' : 'skipped';
 					});
 					this.column(2);
 					list = _.map(grouped.relevant || [], function(a){return a.get('title')});
@@ -1966,7 +1971,7 @@ define(["jquery",
 					var func;
 					_.each(_.range(1, 12), function(i) {
 						func = "h{0}".format(i);
-						this[func] && this[func](r);
+						this[func] && this[func](g);
 					}, this);
 				}
 				return this;
@@ -2015,12 +2020,11 @@ define(["jquery",
 					Group.prefix = group.prefix;
 					this.$continue.attr('title', "Continue group analysis: {0}".format(group.title));
 					// get results from cache, result is present when key with article ID exists
-					var key, result;
-					window.Results = new Collection;
+					var key, result, article;
 					for(var i = 0; i < localStorage.length; i++) {
 						key = localStorage.key(i);
-						if(!isNaN(parseInt(key))) {
-							Results.add(this.getItem(key));
+						if(article = Group.get(key)) {
+							article.set(this.getItem(key));
 						}
 					}
 					this.groupStatus();
@@ -2028,10 +2032,10 @@ define(["jquery",
 			},
 			groupStatus: function() {
 				var total = Group.length;
-				var done = Results.length;
-				var relevant = Results.has('summary');
+				var done = _.size(Group.has('analyzed'));
+				var relevant = _.size(_.compact(Group.pluck('analyzed')));
 				this.$continue.text("Continue {0}/{1}".format(done, total));
-				this.$render.text("{0} results".format(relevant.length));
+				this.$render.text("{0} results".format(relevant));
 				this.$render.toggleClass('disabled', !done);
 				this.$continue.toggleClass('disabled', !done);
 			},
@@ -2068,8 +2072,8 @@ define(["jquery",
 				});
 			},
 			continueResults: function() {
-				var todo = _.difference(Group.pluck('id'), Results.pluck('id'));
-				this.analyzeNext(todo);
+				var todo = Group.filter(function(a) { return a.has('analyzed'); });
+				this.analyzeNext(_.invoke(todo, 'get', 'id'));
 			},
 			renderResults: function() {
 				var gv = new GroupHypothesesView;
@@ -2088,17 +2092,17 @@ define(["jquery",
 					this.groupStatus();
 					_.debounce(function() {
 						var cached = App.getItem(next);
+						var groupStore = Group.get(next);
 						if(cached) {
-							if(cached.summary) {
-								Results.add(cached);
-							}
+							groupStore.set(cached);
 							me.analyzeNext(todo);
 						} else {
 							var article = me.analyzeArticle(next);
 							article.bind('complete', function() {
+								// get from results from MainArticle and apply to Group entry
 								var results = article.get('results');
 								if(results) {
-									Results.add(results);
+									groupStore.set(results);
 								}
 								me.analyzeNext(todo);
 							});
@@ -2111,7 +2115,6 @@ define(["jquery",
 			},
 			analyzeGroup: function(input) {
 				window.Group = new PageList;
-				window.Results = new Collection;
 				this.groupStatus();
 				this.clearCache();
 
@@ -2120,7 +2123,7 @@ define(["jquery",
 				Group.bind('loaded', this.analyzeNext, this);
 				Group.bind('complete', this.clear, this);
 				Group.bind('complete', gv.render, gv);
-				Results.bind('add', function(r) {
+				Group.bind('change:summary', function(r) {
 					console.log("Done:", r.get('summary'));
 				});
 
