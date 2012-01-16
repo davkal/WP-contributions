@@ -225,9 +225,7 @@ define(["jquery",
 
 		window.Page = Model.extend({
 			defaults: {
-				'lang': 'en',
-				'ongoing': false,
-				'full_text': false
+				'lang': 'en'
 			},
 			loaded: 'found',
 			isMain: function() {
@@ -237,7 +235,7 @@ define(["jquery",
 				App.status("Querying en.wikipedia.org...");
 				var input = this.get('input');
 				var identifier = isNaN(input) ? "titles={0}".format(encodeURI(input)) : "pageids={0}".format(input);
-				var full = this.get('full_text') ? "&export" : "";
+				var full = this.isMain() ? "&export" : "";
 				var url = "http://{0}.wikipedia.org/w/api.php?action=query&prop=info&format=json&redirects&callback=?&{1}{2}".format(this.get('lang'), identifier, full);
 				return url;
 			},
@@ -909,18 +907,14 @@ define(["jquery",
 				}
 			},
 			url: function() {
-				if(Article.has('title')) {
-					App.status("Querying toolserver...");
-					return "http://toolserver.org/~sonet/api.php?lang=en&editors&anons&callback=?&article="
-						+ encodeURI(Article.get('title'));
-				}
+				App.status("Querying toolserver...");
+				return "http://toolserver.org/~sonet/api.php?lang=en&editors&anons&callback=?&article="
+					+ encodeURI(Article.get('title'));
 			},
 			parse: function(res) {
 				if(res.error) {
 					App.error("Invalid article.");
 					return;
-				} else {
-					App.status("Parsing contributors...");
 				}
 				var info = _.extract(res, ["first_edit", "count", "editor_count", "anon_count", "last_edit", "minor_count"]);
 				// prelimenary
@@ -1194,7 +1188,7 @@ define(["jquery",
 			fetchAuthors: function() {
 				var max = 50; // n < 2 * max
 				var me = this;
-				var thorough = Article.thorough;
+				var thorough = App.thorough;
 				if(!thorough && !this.sample && this.length > max * 2) {
 					// limit to sample for text survival analysis
 					var mod = Math.round(this.length / max);
@@ -1964,11 +1958,16 @@ define(["jquery",
 				if(r.length == 0) {
 					this.display("Article group empty", "No articles were found that qualify for analysis.");
 				} else {
+					var list;
+					var grouped = r.groupBy(function(a) {
+						return a.has('summary') ? 'relevant' : 'skipped';
+					});
 					this.column(2);
-					this.textarea('Articles analyzed ({0})'.format(r.length), r.pluck('title').join('\n'));
+					list = _.map(grouped.relevant || [], function(a){return a.get('title')});
+					this.textarea('Articles relevant ({0})'.format(_.size(list)), list.join('\n'));
 					this.column(3);
-					var relevant = _.map(r.has('summary'), function(a) { return a.get('title'); });
-					this.textarea('Articles relevant ({0})'.format(relevant.length), relevant.join('\n'));
+					list = _.map(grouped.skipped || [], function(a){return a.get('title')});
+					this.textarea('Articles skipped ({0})'.format(_.size(list)), list.join('\n'));
 
 					// render all hypotheses H1 - H11
 					var func;
