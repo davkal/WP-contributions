@@ -6,6 +6,14 @@ String.prototype.startsWith = function(prefix) {
 	  return (this.substr(0, prefix.length) === prefix);
 }
 
+String.prototype.toTitleCase = function () {
+	var A = this.split(' '), B = [];
+	for (var i = 0; A[i] !== undefined; i++) {
+		B[B.length] = A[i].substr(0, 1).toUpperCase() + A[i].substr(1);
+	}
+	return B.join(' ');
+}
+
 String.prototype.format = function() {
     var s = this,
         i = arguments.length;

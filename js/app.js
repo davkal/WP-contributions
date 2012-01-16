@@ -148,6 +148,25 @@ define(["jquery",
 		});
 
 		window.Location = Model.extend({
+			url: function() {
+				return 'http://localhost/~david/quova.php?ip=' + this.get('ip');
+			},
+			parse: function(res) {
+				// JSON from Quova IP locator
+				var loc = res.ipinfo.Location;
+				var attr = {
+					region: loc.CountryData.country.toTitleCase(),
+					country_code: loc.CountryData.country_code.toUpperCase(),
+					latitude: loc.latitude,
+					longitude: loc.longitude,
+					located: true
+				};
+				if(loc.StateData.state_code) {
+					attr.state = loc.StateData.state.toTitleCase();
+					attr.state_code = loc.StateData.state_code.toUpperCase();
+				}
+				return attr;
+			},
 			toString: function() {
 				var str = "{0}; {1}".format(this.get('latitude'), this.get('longitude'));
 				if(this.has('region')) {
@@ -785,7 +804,6 @@ define(["jquery",
 				var url = "http://en.collaborativetrust.com/WikiTrust/RemoteAPI?method=wikimarkup&pageid={0}&revid={1}".format(Article.get('pageid'), this.id);
 				App.status("Authors present in revision {0}...".format(_.isString(count) && count || this.id));
 				var parse = function(res){
-					App.status("Parsing wikitext...");
 					var text = $(res.responseText).text().trim();
 					var pattern = /{{#t:[^{}]*}}/gm;
 					var tokens = text.match(pattern);
@@ -942,6 +960,9 @@ define(["jquery",
 						if (name.toLowerCase().endsWith('bot')) {
 							console.log("Unregistered bot, counting as author:", name);
 						}
+						if(PMCU[name]) {
+							console.log("PMCU", name);
+						}
 						author = new Author({
 							id: name,
 							urlencoded: obj.urlencoded,
@@ -1085,8 +1106,8 @@ define(["jquery",
 					_.defer(_.bind(this.retrieve, this));
 				} else {
 					this.offset = null;
+					App.status();
 				}
-				App.status();
 				return pages;
 			}
 		});
@@ -1167,7 +1188,7 @@ define(["jquery",
 				});
 			},
 			fetchAuthors: function() {
-				var max = 20; // n < 2 * max
+				var max = 50; // n < 2 * max
 				var me = this;
 				var thorough = Article.thorough;
 				if(!thorough && !this.sample && this.length > max * 2) {
@@ -1729,13 +1750,13 @@ define(["jquery",
 					var me = this;
 					var table;
 					var cols = [
-						// TODO add username
 						{label: 'Date', type: 'date'},
 						{label: 'Sd(km)', type: 'number'},
-						{type: 'string', role: 'annotationText'}
+						{type: 'string', role: 'annotationText'},
+						{type: 'string', role: 'tooltip'}
 					];
 					var rows = _.map(revisions, function(rev, index) {
-						return [rev.get('timestamp'), rev.get('sig_dist'), "" + rev.id];
+						return [rev.get('timestamp'), rev.get('sig_dist'), "" + rev.id, "Rev: {0} User: {1}".format(rev.id, rev.get('user'))];
 					});
 					var onSelect = function(){
 						var sel = me.chart.getSelection()[0];
@@ -1889,7 +1910,6 @@ define(["jquery",
 				var values = _.map(results, function(res) {
 					return linearRegression(res.get('after_sig_dists')).r;
 				});
-				console.log("H9", results, values);
 
 				this.row(['span-one-third', 'span-two-thirds'], "H9", "After an event has ended, the spatial distribution of the contributors will become less local.");
 				this.display("Correlation between article age and localness", "{0} articles have contributions after the event.".format(results.length));
@@ -1907,7 +1927,6 @@ define(["jquery",
 					});
 					return linearRegression(ratios).r;
 				});
-				console.log("H10", results, values);
 
 				this.row(['span-one-third', 'span-two-thirds'], "H10", "For the duration of the event the article text contains more local contributions than distant ones.");
 				this.display("Proportion of local contributions staying in the text during the event", "{0} articles have locatable contributions during the event.".format(results.length));
@@ -1922,7 +1941,6 @@ define(["jquery",
 				var values = _.map(results, function(res) {
 					return linearRegression(res.get('after_sig_dists_survivors')).r;
 				});
-				console.log("H11", results, values);
 
 				this.row(['span-one-third', 'span-two-thirds'], "H11", "After an event has ended, the spatial distribution of the surviving contributions will become less local.");
 				this.display("Correlation between article age and localness", "{0} articles have contributions after the event.".format(results.length));
@@ -1952,9 +1970,11 @@ define(["jquery",
 				return this;
 			}
 		});
+		
+		// TODO make Locations global for re-use (user pages)
 
 		// NICE TO HAVE
-		// make Locations global for re-use
+		// timeline chart with zooming
 		// town in userpages?
 		// include poor mans checkuser
 		// compare localness of other languages
@@ -2001,6 +2021,7 @@ define(["jquery",
 							dataType: "jsonp",
 							data: {
 								action: "opensearch",
+								namespace: "0|10|14",
 								format: "json",
 								search: request.term
 							},
@@ -2043,7 +2064,7 @@ define(["jquery",
 			},
 			analyzeNext: function(todo, count) {
 				if(!todo) {
-					todo = _.shuffle(Group.pluck('id')).slice(App.thorough ? 0 : -25);
+					todo = _.shuffle(Group.pluck('id')).slice(App.thorough ? 0 : -100);
 					count = todo.length;
 					// cache group sample
 					var list = _.map(todo, function(t) {
@@ -2159,6 +2180,7 @@ define(["jquery",
 			setItem: function(key, value, nocheck) {
 				value = JSON.stringify(value);
 				if(nocheck || !App.group && value.length < CACHE_LIMIT) {
+					//console.log("Caching", key);
 					var s = lz77.compress(value);
 					try { 
 						localStorage.setItem(key, s);
@@ -2228,7 +2250,42 @@ define(["jquery",
 
 	return {
 		init: function() {
+			window.PMCU = new Backbone.Collection;
 			window.App = new AppView;
+
+			/* runtime 4h
+			locateIP = _.debounce(function() {
+				var item = PMCU.find(function(m) {
+					return !m.has('located');
+				});
+				if(item) {
+					item.bind('change:region', locateIP);
+					item.fetch();
+				}
+			}, 600);
+
+			$.ajax({
+				url: 'http://localhost/~david/proxy.php',
+				data: {
+					url: "http://wikiscanner.virgil.gr/pmcu/?nolimit"
+				}, 
+				success: function(res) {
+					res = res.replace(/<img[^>]+>/ig, "<img>");
+					$text = $(res);
+					var user, ip, $cell;
+					_.each($text.find('tr'), function(tr) {
+						$cell = $('td', tr).first();
+						if(user = $cell.text()) {
+							if(!PMCU.get(user)) {
+								ip = $cell.next().text();
+								PMCU.add(new Location({id: user, ip: ip}));
+						 	}
+						}
+					});
+					locateIP();
+				}
+			});
+			*/
 
 			// Playground
 			/* 
