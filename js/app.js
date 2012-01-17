@@ -19,6 +19,7 @@ define(["jquery",
 		window.GROUP_DELAY = 1 * 1000; // (ms) time before analyzing next article
 		window.RE_PARENTHESES = /\([^\)]*\)/g;
 		window.RE_WIKI_LINK = /\[\[[^\]]*\]\]/g;
+		window.MS_PER_DAY = 1000 * 60 * 60 * 24;
 
 		window.c = function() {
 			console.log(arguments);
@@ -596,7 +597,7 @@ define(["jquery",
 				});
 
 				// H1,H2 timedelta created - started
-				res.delta = (res.created - res.start) / 1000 / 60 / 60 / 24; // in days
+				res.delta = (res.created - res.start) / MS_PER_DAY; // in days
 				res.h1 = res.h2 = true;
 
 				// H3 first language
@@ -1210,27 +1211,30 @@ define(["jquery",
 				});
 			},
 			fetchAuthors: function() {
-				var max = 50; // n < 2 * max
 				var me = this;
-				var thorough = App.thorough;
-				if(!thorough && !this.sample && this.length > max * 2) {
-					// limit to sample for text survival analysis
-					var mod = Math.round(this.length / max);
-					this.each(function(r, i) {
-						if(i % mod == 0) {
-							r.set({selected: true});
+				if(!this.sampled) {
+					// limit to one rev per day for text survival analysis
+					var dayed = this.groupBy(function(r) {
+						return dformat(r.get('timestamp'));
+					});
+					var last;
+					_.each(dayed, function(list, day) {
+						if(App.thorough || !last 
+							|| (new Date(day) - new Date(last)) / MS_PER_DAY >= 3) {
+							list[0].set({selected: true});
+							last = day;
 						}
 					});
-					this.sample = _.size(this.has('selected'));
-					console.log("Selected revisions for text analysis", this.sample, this.length);
+					this.sampled = _.size(this.has('selected'));
+					console.log("Selected revisions for text analysis", this.sampled, this.length);
 				}
 				var rev = this.find(function(r) {
 					// select only sample if population is too big
-					return !r.has('authors') && (!me.sample || r.get('selected'));
+					return !r.has('authors') && r.get('selected');
 				});
 				if(rev) {
 					var me = this;
-					var count = this.sample || this.length;
+					var count = this.sampled || this.length;
 					var onError = function(e) {
 						console.error(e);
 						me.page--;
@@ -2029,7 +2033,6 @@ define(["jquery",
 			}
 		});
 		
-		// TODO fetch only authors for one revision per day
 		// TODO timelinechart with histogram
 		// TODO make Locations global for re-use (user pages)
 		// TODO group analysis adds to cache results
