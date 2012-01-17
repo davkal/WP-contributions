@@ -7,12 +7,13 @@ define(["jquery",
 		"wpcoordinatesparser", 
 		"countries", 
 		"bots", 
+		"pmcu", 
 		"jquery-ui",
 		"order!d3",
 		"order!d3.chart",
 		'async!http://maps.google.com/maps/api/js?sensor=false',
 		'goog!visualization,1,packages:[corechart,geochart]'
-	], function($, dateFormat, _, Backbone, lz77, DateParser, CoordsParser, countries, botlist) {
+	], function($, dateFormat, _, Backbone, lz77, DateParser, CoordsParser, countries, botlist, PMCU) {
 
 		window.CACHE_LIMIT = 100 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
 		window.GROUP_DELAY = 1 * 1000; // (ms) time before analyzing next article
@@ -152,6 +153,10 @@ define(["jquery",
 				return 'http://localhost/~david/quova.php?ip=' + this.get('ip');
 			},
 			parse: function(res) {
+				if(!res) {
+					console.log("IP lookup failed", res);
+					return;
+				}
 				// JSON from Quova IP locator
 				var loc = res.ipinfo.Location;
 				var attr = {
@@ -501,7 +506,7 @@ define(["jquery",
 					if(this.relevant()) {
 						revisions.retrieve();
 						this.calcSignatureDistance();
-						authors.checkUserPages();
+						authors.locateUsers();
 					} else {
 						this.trigger('done', this);
 					}
@@ -882,33 +887,48 @@ define(["jquery",
 					return sd / allCount;
 				}
 			},
+			addLocation: function(loc) {
+				var author = this.get(loc.id);
+				Article.get('locations').add(loc);
+				author.set({location: loc, located: true});
+			},
 			addCountry: function(author, country) {
 				country = Countries.get(country);
 				if(country) {
 					var location = country.clone();
 					location.set({id: author.id});
-					Article.get('locations').add(location);
-					author.set({location: location});
+					this.addLocation(location);
 				}
 			},
-			checkUserPages: function() {
+			locateUsers: function() {
 				var locations = Article.get('locations');
 				var next = this.find(function(a) {
-					return !a.has('page') && !locations.get(a.id);
+					return !a.has('located') && !locations.get(a.id);
 				});
 				if(next) {
-					var userPage = new UserPage({title: next.get('urlencoded'), author: next});
-					next.set({page: userPage});
-					if(App.thorough) {
-						// check all users
-						userPage.bind('loaded', this.checkUserPages, this);
+					next.set({located: false});
+					// try PMCU username -> IP mapping
+					if(PMCU[next.id]) {
+						var loc = new Location({id: next.id, ip: PMCU[next.id]});
+						loc.bind('change:located', this.addLocation, this);
+						loc.bind('loaded', this.locateUsers, this);
+						App.status('IP lookup for {0}...'.format(next.id));
+						_.debounce(_.bind(loc.retrieve, loc), 500)();
+					} else if(App.thorough || !this.creator_page) {
+						// try userpages
+						var userPage = new UserPage({title: next.get('urlencoded'), author: next});
+						if(!App.thorough) {
+							// only first user
+							this.creator_page = userPage;
+						}
+						userPage.bind('loaded', this.locateUsers, this);
+						userPage.bind('country', this.addCountry, this);
+						App.status('User page {0}...'.format(next.id));
+						userPage.retrieve();
 					} else {
-						// only first user
-						userPage.bind('loaded', function() {this.trigger('done');}, this);
+						// skipping user pages
+						this.locateUsers();
 					}
-					userPage.bind('country', this.addCountry, this);
-					App.status('User page {0}...'.format(next.id));
-					userPage.retrieve();
 				} else {
 					this.trigger('done', this);
 				}
@@ -953,7 +973,7 @@ define(["jquery",
 				});
 
 				// adding all editors
-				var editors = [], author, bot;
+				var editors = [], author, bot, ip;
 				var bots = Article.get('bots');
 				_.each(res.editors, function(obj, name) {
 					if(bot = bots.get(name)) {
@@ -963,10 +983,7 @@ define(["jquery",
 						});
 					} else {
 						if (name.toLowerCase().endsWith('bot')) {
-							console.log("Unregistered bot, counting as author:", name);
-						}
-						if(PMCU[name]) {
-							console.log("PMCU", name);
+							console.log("User name contains 'bot' but is not a registered bot, counting as author:", name);
 						}
 						author = new Author({
 							id: name,
@@ -2012,13 +2029,14 @@ define(["jquery",
 			}
 		});
 		
+		// TODO fetch only authors for one revision per day
+		// TODO timelinechart with histogram
 		// TODO make Locations global for re-use (user pages)
+		// TODO group analysis adds to cache results
+		// TODO try File API
 
 		// NICE TO HAVE
-		// timeline chart with zooming
 		// town in userpages?
-		// include poor mans checkuser
-		// compare localness of other languages
 		// you are where you edit
 
 		window.AppView = Backbone.View.extend({
@@ -2299,7 +2317,6 @@ define(["jquery",
 
 	return {
 		init: function() {
-			window.PMCU = new Backbone.Collection;
 			window.App = new AppView;
 
 			/* runtime 4h
@@ -2311,29 +2328,7 @@ define(["jquery",
 					item.bind('change:region', locateIP);
 					item.fetch();
 				}
-			}, 600);
-
-			$.ajax({
-				url: 'http://localhost/~david/proxy.php',
-				data: {
-					url: "http://wikiscanner.virgil.gr/pmcu/?nolimit"
-				}, 
-				success: function(res) {
-					res = res.replace(/<img[^>]+>/ig, "<img>");
-					$text = $(res);
-					var user, ip, $cell;
-					_.each($text.find('tr'), function(tr) {
-						$cell = $('td', tr).first();
-						if(user = $cell.text()) {
-							if(!PMCU.get(user)) {
-								ip = $cell.next().text();
-								PMCU.add(new Location({id: user, ip: ip}));
-						 	}
-						}
-					});
-					locateIP();
-				}
-			});
+			}, 800);
 			*/
 
 			// Playground
