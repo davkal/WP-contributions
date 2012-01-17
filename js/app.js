@@ -12,7 +12,7 @@ define(["jquery",
 		"order!d3",
 		"order!d3.chart",
 		'async!http://maps.google.com/maps/api/js?sensor=false',
-		'goog!visualization,1,packages:[corechart,geochart]'
+		'goog!visualization,1,packages:[corechart,geochart,annotatedtimeline]'
 	], function($, dateFormat, _, Backbone, lz77, DateParser, CoordsParser, countries, botlist, PMCU) {
 
 		window.CACHE_LIMIT = 100 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
@@ -890,6 +890,7 @@ define(["jquery",
 			},
 			addLocation: function(loc) {
 				var author = this.get(loc.id);
+				loc.calcDistance(Article.get('location'));
 				Article.get('locations').add(loc);
 				author.set({location: loc, located: true});
 			},
@@ -1044,11 +1045,6 @@ define(["jquery",
 					'Ireland': 'Republic of Ireland',
 					'Russian Federation': 'Russia'
 				};
-			},
-			distance: function(article, loc) {
-				this.each(function(c) {
-					c.calcDistance(loc);
-				});
 			},
 			isCountry: function(text) {
 				return this.alt[text] && this.get(this.alt[text]) || this.get(text);
@@ -1220,7 +1216,7 @@ define(["jquery",
 					var last;
 					_.each(dayed, function(list, day) {
 						if(App.thorough || !last 
-							|| (new Date(day) - new Date(last)) / MS_PER_DAY >= 3) {
+							|| (new Date(day) - new Date(last)) / MS_PER_DAY >= 7) {
 							list[0].set({selected: true});
 							last = day;
 						}
@@ -1303,8 +1299,8 @@ define(["jquery",
 					this.el = $('#' + this.id);
 				}
 			},
-			div: function(id) {
-				var el = this.make('div', {id: id});
+			div: function(id, classes) {
+				var el = this.make('div', {'id': id, 'class': classes || ''});
 				if(this.body) {
 					this.body.append(el);
 				} else {
@@ -1759,7 +1755,7 @@ define(["jquery",
 					});
 					table.addRows(rows);
 				}
-				var ct = this.div(_.uniqueId(type));
+				var ct = this.div(_.uniqueId(type), 'gchart');
 				this.chart = new google.visualization[type](ct);
 				if(onSelect) {
 					google.visualization.events.addListener(this.chart, 'select', onSelect);
@@ -1774,7 +1770,7 @@ define(["jquery",
 			render: function() {
 				var revisions = Article.get('revisions').has('sig_dist');
 				if(_.size(revisions)) {
-					this.row();
+					this.row(['span16']);
 					var me = this;
 					var table;
 					var cols = [
@@ -1791,7 +1787,7 @@ define(["jquery",
 						var revid = table.getValue(sel.row, 2);
 						Article.get('revisions').current(revid);
 					};
-					table = this.renderTable('LineChart', cols, rows, onSelect);
+					table = this.renderTable('AnnotatedTimeLine', cols, rows, onSelect);
 				}
 				return this;
 			}
@@ -2199,7 +2195,6 @@ define(["jquery",
 
 				Article.bind('change:pageid', av.render, av);
 				Article.bind('change:location', pv.render, pv);
-				Article.bind('change:location', Countries.distance, Countries);
 				Article.bind('found', av.render, av);
 				Article.bind('change:results', hv.render, hv);
 				authors.bind('loaded', av.render, av);
