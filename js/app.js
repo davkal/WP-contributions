@@ -17,6 +17,7 @@ define(["jquery",
 
 		window.CACHE_LIMIT = 100 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
 		window.GROUP_DELAY = 1 * 1000; // (ms) time before analyzing next article
+		window.GROUP_KEY = "articleGroup";
 		window.RE_PARENTHESES = /\([^\)]*\)/g;
 		window.RE_WIKI_LINK = /\[\[[^\]]*\]\]/g;
 		window.MS_PER_DAY = 1000 * 60 * 60 * 24;
@@ -1077,11 +1078,13 @@ define(["jquery",
 			}
 		});
 
-		// Template:Infobox_military_conflict
 		// Template:Infobox_civil_conflict
 		// Template:Infobox_historical_event
 		// Category:Political_riots
 		// Category:2011_riots
+
+		// Too many irrelevant articles: 
+		// Template:Infobox_military_conflict
 
 		window.PageList = Collection.extend({
 			model: Page,
@@ -1089,12 +1092,12 @@ define(["jquery",
 			fetchPages: function(title) {
 				// template or category?
 				this.title = title;
-				this.prefix = title.split(':')[0];
-				if(this.prefix != 'Template' && this.prefix != 'Category') {
+				var prefix = title.split(':')[0];
+				if(prefix != 'Template' && prefix != 'Category') {
 					App.error('Not a valid template or category.');
 					return;
 				}
-				var isTemplate = this.prefix == 'Template';
+				var isTemplate = prefix == 'Template';
 
 				this.listkey = isTemplate ? "embeddedin" : "categorymembers";
 				this.titlekey = isTemplate ? "eititle" : "cmtitle";
@@ -1972,7 +1975,7 @@ define(["jquery",
 				var g = Group;
 				var results = g.has('analyzed');
 				this.row(['span-one-third', 'span-one-third', 'span-one-third']);
-				this.link(g.prefix, g.title, "http://{0}.wikipedia.org/wiki/{1}".format('en', g.title));
+				this.link("Article group", g.title, "http://{0}.wikipedia.org/wiki/{1}".format('en', g.title));
 				if(results.length == 0) {
 					this.display("Article group empty", "No articles were found that qualify for analysis.");
 				} else {
@@ -2066,11 +2069,10 @@ define(["jquery",
 				this.status();
 			},
 			checkCacheForGroup: function() {
-				var group = this.getItem('group');
+				var group = this.getItem(GROUP_KEY);
 				if(group) {
 					window.Group = new PageList(group.items);
 					Group.title = group.title;
-					Group.prefix = group.prefix;
 					// get results from cache, result is present when key with article ID exists
 					var key, result, article;
 					for(var i = 0; i < localStorage.length; i++) {
@@ -2136,7 +2138,7 @@ define(["jquery",
 				if(!todo) {
 					todo = _.shuffle(Group.pluck('id'));
 					// cache group for stop/continue
-					App.setItem('group', {title: Group.title, prefix: Group.prefix, items: Group.toJSON()}, true);
+					App.setItem(GROUP_KEY, {title: Group.title, items: Group.toJSON()}, true);
 				}
 				var delay = Group.length == todo.length ? 0 : GROUP_DELAY;
 				var next = todo.pop();
