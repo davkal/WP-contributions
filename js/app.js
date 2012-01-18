@@ -152,7 +152,8 @@ define(["jquery",
 
 		window.Location = Model.extend({
 			url: function() {
-				return 'http://localhost/~david/quova.php?ip=' + this.get('ip');
+				// use this global one until I get my own webhosting
+				return 'http://130344.webhosting31.1blu.de/quova/quova.php?ip=' + this.get('ip');
 			},
 			parse: function(res) {
 				if(!res) {
