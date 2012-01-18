@@ -563,6 +563,9 @@ define(["jquery",
 				return true;
 			},
 			results: function() {
+				if(this.has('results')) {
+					return this.get('results');
+				}
 				var id = this.get('input');
 				var title = this.get('title');
 				var res = {
@@ -571,11 +574,12 @@ define(["jquery",
 					analyzed: false // false means irrelevant
 				};
 
-				if(this.has('results') || !this.relevant()) {
+				if(!this.relevant()) {
 					console.log("Article does not qualify:", title);
 					App.setItem(id, res, true);
+					this.set({results: res});
 					this.trigger('complete');
-					return this.get('results') || res;
+					return res;
 				}
 
 				var authors = this.get('authors');
@@ -1823,7 +1827,6 @@ define(["jquery",
 					// adding page views
 					var views = Article.get('traffic');
 					if(views.length) {
-						console.log("Page views for days", views.length);
 						views.each(function(v) {
 							rows.push([v.get('date'), undefined, v.get('views')]);
 						})
@@ -2085,6 +2088,7 @@ define(["jquery",
 			}
 		});
 		
+		// TODO improve group results overview, for each H say how many qualified
 		// TODO make Locations global for re-use (user pages)
 		// TODO group analysis adds to cache results
 		// TODO try File API
@@ -2177,7 +2181,9 @@ define(["jquery",
 				});
 			},
 			continueGroup: function() {
-				var todo = Group.filter(function(a) { return a.has('analyzed'); });
+				// FIXME move this to analyzeGroup()
+				this.group = true;
+				var todo = Group.filter(function(a) { return !a.has('analyzed'); });
 				this.analyzeNext(_.invoke(todo, 'get', 'id'));
 			},
 			renderGroup: function() {
