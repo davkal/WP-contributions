@@ -1554,7 +1554,7 @@ define(["jquery",
 					{label: 'Date', type: 'date'},
 					{label: 'Length', type: 'number'}
 				];
-				chart.renderTable('LineChart', cols, r.after_text_lengths, null, 600, "Text lengths after event");
+				chart.renderTable('LineChart', cols, r.after_text_lengths, "Text lengths after event");
 
 				// H9 sig dists after event chart
 				chart = this.subview(GoogleChartView);
@@ -1562,7 +1562,7 @@ define(["jquery",
 					{label: 'Date', type: 'date'},
 					{label: 'Sd(km)', type: 'number'}
 				];
-				chart.renderTable('LineChart', cols, r.after_sig_dists, null, 600, "Signature distance after event");
+				chart.renderTable('LineChart', cols, r.after_sig_dists, "Signature distance after event");
 
 				// H10 local vs distant column chart
 				chart = this.subview(GoogleChartView);
@@ -1571,7 +1571,7 @@ define(["jquery",
 					{label: 'Local', type: 'number'},
 					{label: 'Distant', type: 'number'}
 				];
-				chart.renderTable('LineChart', cols, r.during_local_ratios, null, 600, "Contributor localness of text survival during event");
+				chart.renderTable('LineChart', cols, r.during_local_ratios, "Contributor localness of text survival during event");
 
 				// H11 sig dists survivors after chart
 				chart = this.subview(GoogleChartView);
@@ -1579,7 +1579,7 @@ define(["jquery",
 					{label: 'Date', type: 'date'},
 					{label: 'Sd(km)', type: 'number'}
 				];
-				chart.renderTable('LineChart', cols, r.after_sig_dists_survivors, null, 600, "Signature distance (survivors) after event");
+				chart.renderTable('LineChart', cols, r.after_sig_dists_survivors, "Signature distance (survivors) after event");
 				
 				return this;
 			}
@@ -1736,15 +1736,14 @@ define(["jquery",
 		});
 
 		window.GoogleChartView = SectionView.extend({
-			renderTable: function(type, cols, rows, onSelect, width, title) {
-				width = width || 800;
-				var config = {
-					strictFirstColumnType: true,
-					width: width
-				};
-				if(title) {
-					config.title = title;
+			renderTable: function(type, cols, rows, config, onSelect) {
+				if(_.isString(config)) {
+					config = {title: config};
 				}
+				config = config || {};
+				config.strictFirstColumnType = true;
+				config.width = config.width || 600;
+
 				var table = new google.visualization.DataTable();
 				// need to be added one by one 
 				_.each(cols, function(col) {
@@ -1792,7 +1791,7 @@ define(["jquery",
 						var revid = table.getValue(sel.row, 2);
 						Article.get('revisions').current(revid);
 					};
-					table = this.renderTable('AnnotatedTimeLine', cols, rows, onSelect);
+					table = this.renderTable('AnnotatedTimeLine', cols, rows, {width: 800}, onSelect);
 				}
 				return this;
 			}
@@ -1820,7 +1819,7 @@ define(["jquery",
 					{label: 'Days', type: 'string'},
 					{label: 'Articles', type: 'number'}
 				];
-				chart.renderTable('ColumnChart', cols, rows, null, 600);
+				chart.renderTable('ColumnChart', cols, rows);
 			},
 			h2: function(results, title, subtitle) {
 				var rows = _.map(results, function(r) {
@@ -1837,7 +1836,7 @@ define(["jquery",
 					{label: 'Date', type: 'date'},
 					{label: 'Delay (d)', type: 'number'}
 				];
-				chart.renderTable('ScatterChart', cols, rows, null, 600);
+				chart.renderTable('ScatterChart', cols, rows);
 			},
 			h3: function(results, title, subtitle) {
 				var langs = _.invoke(results, 'get', 'first_lang');
@@ -1856,7 +1855,7 @@ define(["jquery",
 					{label: 'Language', type: 'string'},
 					{label: 'Articles', type: 'number'}
 				];
-				chart.renderTable('ColumnChart', cols, rows, null, 600);
+				chart.renderTable('ColumnChart', cols, rows);
 			},
 			h4: function(results, title, subtitle) {
 				var locals = _.filter(results, function(l) {return l.get('creator_dist') <= l.get('mean_dist')});
@@ -1875,7 +1874,7 @@ define(["jquery",
 					{label: 'Distance', type: 'string'},
 					{label: 'Articles', type: 'number'}
 				];
-				chart.renderTable('PieChart', cols, rows, null, 600);
+				chart.renderTable('PieChart', cols, rows);
 			},
 			h5: function(results, title, subtitle) {
 				var values = _.map(results, function(e) {
@@ -2035,7 +2034,6 @@ define(["jquery",
 		});
 		
 		// TODO group analysis adds to cache results
-		// TODO timelinechart with histogram
 		// TODO make Locations global for re-use (user pages)
 		// TODO try File API
 
