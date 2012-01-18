@@ -2043,7 +2043,7 @@ define(["jquery",
 		// TODO group analysis adds to cache results
 		// TODO make Locations global for re-use (user pages)
 		// TODO proxy somewhere instead of yql
-		// TODO make quova calls not PHP or cache quova calls
+		// TODO make quova calls not PHP 
 		// TODO try File API
 
 		// NICE TO HAVE
@@ -2059,7 +2059,7 @@ define(["jquery",
 				"click #cache": "clearCache",
 				"click #analyze": "analyzeOnClick",
 				"click .example": "analyzeExample",
-				"focus #input": "reset",
+				"focus #input": "clear",
 				"keypress #input": "analyzeOnEnter"
 			},
 			initialize: function() {
@@ -2151,7 +2151,6 @@ define(["jquery",
 				var next = todo.pop();
 				var me = this;
 				if(next) {
-					this.groupStatus();
 					_.debounce(function() {
 						var cached = App.getItem(next);
 						var groupStore = Group.get(next);
@@ -2174,9 +2173,10 @@ define(["jquery",
 					console.log("Group analysis complete.");
 					Group.trigger('complete');
 				}
+				this.groupStatus();
 			},
 			analyzeGroup: function(input) {
-				this.reset();
+				this.clear();
 
 				window.Group = new PageList;
 				this.groupStatus();
@@ -2194,7 +2194,7 @@ define(["jquery",
 				Group.fetchPages(input);
 			},
 			analyzeArticle: function(input) {
-				this.reset();
+				this.clear();
 
 				window.Article = new MainArticle({group: this.group});
 				var authors = Article.get('authors');
@@ -2280,6 +2280,7 @@ define(["jquery",
 					.parents('.clearfix')
 					.removeClass('error');
 				$('a[href!="#"]', this.nav).remove();
+				this.input.autocomplete('close');
 			},
 			link: function(sec) {
 				if(!$('a[href="#{0}"]'.format(sec.id), this.nav).length) {
@@ -2294,15 +2295,6 @@ define(["jquery",
 				App.status(text);
 			}, 
 			analyze: function(input) {
-				this.group = input.indexOf(':') >= 0;
-				this.thorough = this.$special.prop('checked');
-				if(this.group) {
-					this.analyzeGroup(input);
-				} else {
-					this.analyzeArticle(input);
-				}
-			},
-			reset: function() {
 				if(window.Group) {
 					Group.unbind();
 				}
@@ -2314,8 +2306,13 @@ define(["jquery",
 						attr.reset && attr.reset();
 					});
 				}
-				this.clear();
-				this.input.autocomplete('close');
+				this.group = input.indexOf(':') >= 0;
+				this.thorough = this.$special.prop('checked');
+				if(this.group) {
+					this.analyzeGroup(input);
+				} else {
+					this.analyzeArticle(input);
+				}
 			},
 			analyzeExample: function(e) {
 				var input = $(e.target).attr("title");
