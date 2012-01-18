@@ -890,9 +890,11 @@ define(["jquery",
 			},
 			addLocation: function(loc) {
 				var author = this.get(loc.id);
-				loc.calcDistance(Article.get('location'));
-				Article.get('locations').add(loc);
-				author.set({location: loc, located: true});
+				if(author) {
+					loc.calcDistance(Article.get('location'));
+					Article.get('locations').add(loc);
+					author.set({location: loc, located: true});
+				}
 			},
 			addCountry: function(author, country) {
 				country = Countries.get(country);
@@ -2029,9 +2031,9 @@ define(["jquery",
 			}
 		});
 		
+		// TODO group analysis adds to cache results
 		// TODO timelinechart with histogram
 		// TODO make Locations global for re-use (user pages)
-		// TODO group analysis adds to cache results
 		// TODO try File API
 
 		// NICE TO HAVE
@@ -2047,6 +2049,7 @@ define(["jquery",
 				"click #cache": "clearCache",
 				"click #analyze": "analyzeOnClick",
 				"click .example": "analyzeExample",
+				"focus #input": "reset",
 				"keypress #input": "analyzeOnEnter"
 			},
 			initialize: function() {
@@ -2164,9 +2167,10 @@ define(["jquery",
 				}
 			},
 			analyzeGroup: function(input) {
+				this.reset();
+
 				window.Group = new PageList;
 				this.groupStatus();
-				this.clearCache();
 
 				var gv = new GroupHypothesesView;
 
@@ -2181,10 +2185,7 @@ define(["jquery",
 				Group.fetchPages(input);
 			},
 			analyzeArticle: function(input) {
-				if(window.Article) {
-					Article.unbind();
-				}
-				this.clear();
+				this.reset();
 
 				window.Article = new MainArticle({group: this.group});
 				var authors = Article.get('authors');
@@ -2291,6 +2292,21 @@ define(["jquery",
 				} else {
 					this.analyzeArticle(input);
 				}
+			},
+			reset: function() {
+				if(window.Group) {
+					Group.unbind();
+				}
+				if(window.Article) {
+					Article.unbind();
+					_.each(_.keys(Article.attributes), function(key) {
+						var attr = Article.attributes[key];
+						attr.unbind && attr.unbind();
+						attr.reset && attr.reset();
+					});
+				}
+				this.clear();
+				this.input.autocomplete('close');
 			},
 			analyzeExample: function(e) {
 				var input = $(e.target).attr("title");
