@@ -527,7 +527,7 @@ define(["jquery",
 				revisions.bind('distancedone', function(){this.done('revisiondistances')}, this);
 				revisions.bind('authorsdone', function(){this.done('revisionauthors')}, this);
 
-				current.bind('change:id', current.fetchAuthors, current);
+				current.bind('change:id', current.retrieve, current);
 				// trigger to load authors for all remaining revisions
 				if(App.thorough) {
 					current.bind('authors', revisions.fetchAuthors, revisions);
@@ -819,39 +819,28 @@ define(["jquery",
 		});
 
 		window.Revision = Model.extend({
-			fetchAuthors: function(count, error) {
-				if(this.has('authors')) {
-					return;
-				}
-				var me = this;
+			url: function() {
 				var url = "http://en.collaborativetrust.com/WikiTrust/RemoteAPI?method=wikimarkup&pageid={0}&revid={1}".format(Article.get('pageid'), this.id);
-				App.status("Authors present in revision {0}...".format(_.isString(count) && count || this.id));
-				var parse = function(res){
-					var text = $(res.responseText).text().trim();
-					var pattern = /{{#t:[^{}]*}}/gm;
-					var tokens = text.match(pattern);
-					text = text.replace(pattern, "").replace(/W[\d\.]*, /, "");
-					me.set({length: text.length});
-					var editors = _.uniq(_.map(tokens, function(token) {
-						return token.replace("{{", "").replace("}}", "").split(",")[2];
-					}));
-					var authors = Article.get('authors');
-					var sd = authors.signatureDistance(editors);
-				   	if(_.isNumber(sd)) {
-						me.set({sig_dist_survivors: sd});
-					}
-					me.set({authors: editors});
-					me.trigger('authors', me);
-				};
-				var options = {
-					success: parse, 
-					url: PROXY_URL,
-					data: {url: url}
-				};
-				if(error) {
-					options.error = error;
+				return PROXY_URL + '?' + $.param({url: url});
+			},
+			sync: function(method, model, options) {
+				options.dataType = "html";
+				return Backbone.sync.call(this, method, model, options);
+			},
+			parse: function(text){
+				var pattern = /{{#t:[^{}]*}}/gm;
+				var tokens = text.match(pattern);
+				text = text.replace(pattern, "").replace(/W[\d\.]*, /, "");
+				this.set({length: text.length});
+				var editors = _.uniq(_.map(tokens, function(token) {
+					return token.replace("{{", "").replace("}}", "").split(",")[2];
+				}));
+				var authors = Article.get('authors');
+				var sd = authors.signatureDistance(editors);
+				if(_.isNumber(sd)) {
+					this.set({sig_dist_survivors: sd});
 				}
-				$.ajax(options);
+				return {authors: editors};
 			}
 		});
 
@@ -1246,18 +1235,12 @@ define(["jquery",
 				if(rev) {
 					var me = this;
 					var count = this.sampled || this.length;
-					var onError = function(e) {
-						console.error(e);
-						me.page--;
-						// try again if yahoo strikes
-						me.fetchAuthors();
-
-					};
 					_.debounce(function() {
-						rev.bind('authors', me.fetchAuthors, me);
+						rev.bind('loaded', me.fetchAuthors, me);
 						me.page++;
 						var progress = "{0}/{1}".format(me.page, count);
-						rev.fetchAuthors(progress, onError);
+						App.status("Authors present in revision {0}...".format(progress));
+						rev.retrieve();
 					}, 800)();
 				} else {
 					this.trigger('authorsdone', this);
