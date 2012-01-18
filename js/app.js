@@ -488,6 +488,7 @@ define(["jquery",
 				var revisions = new RevisionCollection;
 				var locations = new LocationCollection;
 				var languages = new LanguageCollection;
+				var traffic = new PageViews;
 				var current = new Revision;
 				var bots = new Authorship(_.map(botlist.list, function(b){return {id: b};}));
 
@@ -540,6 +541,7 @@ define(["jquery",
 					revisions: revisions,
 					locations: locations,
 					languages: languages,
+					traffic: traffic,
 					current: current,
 					bots: bots
 				});
@@ -815,6 +817,41 @@ define(["jquery",
 				}
 				App.status();
 				return attr;
+			}
+		});
+
+		window.PageViews = Collection.extend({
+			comparator: function(p) {
+				return p.get('date');
+			},
+			month: function(d) {
+				return $.format.date(d, "yyyyMM");
+			},
+			url: function() {
+				this.current = this.offset || new Date();
+				this.current.setDate(1);
+				var url = "http://stats.grok.se/json/en/{0}/{1}".format(this.month(this.current), Article.get('title').replace(/ /g, "_"));
+				return PROXY_URL + '?' + $.param({url: url});
+			},
+			parse: function(res) {
+				var views = _.map(res.daily_views, function(v, d) {
+					return {date: d, views: v};
+				});
+				var created = new Date(Article.get('revisions').first().get('timestamp'));
+				if(this.continue && this.current > created) {
+					this.offset = new Date(this.current);
+					this.offset.setMonth(this.offset.getMonth() - 1);
+					// FIXME check for 0 and replace title with redirect
+					App.status("Page views for {0}...".format(this.month(this.offset)));
+					_.defer(_.bind(this.retrieve, this));
+				} else {
+					views = _.filter(views, function(v) {
+						return new Date(v.date) >= created - MS_PER_DAY;
+					});
+					this.offset = null;
+					App.status();
+				}
+				return views;
 			}
 		});
 
@@ -1772,22 +1809,41 @@ define(["jquery",
 					var table, start, end;
 					var cols = [
 						{label: 'Date', type: 'date'},
-						{label: 'Sd(km)', type: 'number'}
+						{label: 'Sd(km)', type: 'number'},
+						{label: 'Page views', type: 'number'}
 					];
 					// TODO annotations: day 3, anon <> regs, locals <> distant
 					var rows = _.map(revisions, function(rev, index) {
-						return [rev.get('timestamp'), rev.get('sig_dist')];
+						return [rev.get('timestamp'), rev.get('sig_dist'), undefined];
 					});
 					// finding start and end interval for 7 days
 					start = new Date(rows[0][0]);
 					end = new Date(start);
 					end.setDate(end.getDate() + 8);
+					// adding page views
+					var views = Article.get('traffic');
+					if(views.length) {
+						console.log("Page views for days", views.length);
+						views.each(function(v) {
+							rows.push([v.get('date'), undefined, v.get('views')]);
+						})
+					} else {
+						// avoiding NaN values
+						rows.push([start, undefined, 0]);
+					}
+					// FIXME doesnt work with Annotated Timeline
 					var onSelect = function(){
 						var sel = me.chart.getSelection()[0];
 						var revid = table.getValue(sel.row, 2);
 						Article.get('revisions').current(revid);
 					};
-					table = this.renderTable('AnnotatedTimeLine', cols, rows, {zoomStartTime: start, zoomEndTime: end}, onSelect);
+					var config = {
+						scaleType: 'allfixed',
+						scaleColumns: [1, 0],
+						zoomStartTime: start, 
+						zoomEndTime: end
+					};
+					table = this.renderTable('AnnotatedTimeLine', cols, rows, config, onSelect);
 				}
 				return this;
 			}
@@ -2031,7 +2087,6 @@ define(["jquery",
 		
 		// TODO make Locations global for re-use (user pages)
 		// TODO group analysis adds to cache results
-		// TODO proxy somewhere instead of yql
 		// TODO try File API
 
 		// NICE TO HAVE
@@ -2200,6 +2255,7 @@ define(["jquery",
 				if(!this.group && google.visualization) { // goole stuff sometimes fails to load
 					var revisions = Article.get('revisions');
 					var current = Article.get('current');
+					var traffic = Article.get('traffic');
 
 					var mv = new MapView();
 					var sv = new SurvivorView();
@@ -2213,8 +2269,11 @@ define(["jquery",
 					authors.bind('done', dv.render, dv);
 
 					revisions.bind('distance', dv.render, dv);
+					revisions.bind('loaded', traffic.retrieve, traffic);
 
 					current.bind('change:authors', sv.render, sv);
+
+					traffic.bind('loaded', dv.render, dv);
 				}
 
 				var results = App.getItem(input);
