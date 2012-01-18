@@ -21,6 +21,7 @@ define(["jquery",
 		window.RE_PARENTHESES = /\([^\)]*\)/g;
 		window.RE_WIKI_LINK = /\[\[[^\]]*\]\]/g;
 		window.MS_PER_DAY = 1000 * 60 * 60 * 24;
+		window.PROXY_URL = "http://130344.webhosting31.1blu.de/proxy.php";
 
 		window.c = function() {
 			console.log(arguments);
@@ -842,7 +843,11 @@ define(["jquery",
 					me.set({authors: editors});
 					me.trigger('authors', me);
 				};
-				var options = {success: parse, url: url, type: 'get'};
+				var options = {
+					success: parse, 
+					url: PROXY_URL,
+					data: {url: url}
+				};
 				if(error) {
 					options.error = error;
 				}
@@ -2041,10 +2046,9 @@ define(["jquery",
 			}
 		});
 		
-		// TODO group analysis adds to cache results
 		// TODO make Locations global for re-use (user pages)
+		// TODO group analysis adds to cache results
 		// TODO proxy somewhere instead of yql
-		// TODO make quova calls not PHP 
 		// TODO try File API
 
 		// NICE TO HAVE

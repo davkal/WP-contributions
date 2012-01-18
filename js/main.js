@@ -36,9 +36,8 @@ require(["jquery",
 		"backbone", 
 		"bootstrap-alerts",
 		"bootstrap-scrollspy",
-		"jquery.xdomainajax",
 		"app"
-	], function($, _, Backbone, ba, bs, jx, app) {
+	], function($, _, Backbone, ba, bs, app) {
 
 		window._ = _;
 
