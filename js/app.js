@@ -527,7 +527,11 @@ define(["jquery",
 
 				current.bind('change:id', current.fetchAuthors, current);
 				// trigger to load authors for all remaining revisions
-				current.bind('authors', revisions.fetchAuthors, revisions);
+				if(App.thorough) {
+					current.bind('authors', revisions.fetchAuthors, revisions);
+				} else {
+					this.done('revisionauthors');
+				}
 
 				this.set({
 					authors: authors,
@@ -1776,22 +1780,25 @@ define(["jquery",
 				if(_.size(revisions)) {
 					this.row(['span16']);
 					var me = this;
-					var table;
+					var table, start, end;
 					var cols = [
 						{label: 'Date', type: 'date'},
-						{label: 'Sd(km)', type: 'number'},
-						{type: 'string', role: 'annotationText'},
-						{type: 'string', role: 'tooltip'}
+						{label: 'Sd(km)', type: 'number'}
 					];
+					// TODO annotations: day 3, anon <> regs, locals <> distant
 					var rows = _.map(revisions, function(rev, index) {
-						return [rev.get('timestamp'), rev.get('sig_dist'), "" + rev.id, "Rev: {0} User: {1}".format(rev.id, rev.get('user'))];
+						return [rev.get('timestamp'), rev.get('sig_dist')];
 					});
+					// finding start and end interval for 7 days
+					start = new Date(rows[0][0]);
+					end = new Date(start);
+					end.setDate(end.getDate() + 8);
 					var onSelect = function(){
 						var sel = me.chart.getSelection()[0];
 						var revid = table.getValue(sel.row, 2);
 						Article.get('revisions').current(revid);
 					};
-					table = this.renderTable('AnnotatedTimeLine', cols, rows, {width: 800}, onSelect);
+					table = this.renderTable('AnnotatedTimeLine', cols, rows, {zoomStartTime: start, zoomEndTime: end}, onSelect);
 				}
 				return this;
 			}
@@ -2035,6 +2042,8 @@ define(["jquery",
 		
 		// TODO group analysis adds to cache results
 		// TODO make Locations global for re-use (user pages)
+		// TODO proxy somewhere instead of yql
+		// TODO make quova calls not PHP or cache quova calls
 		// TODO try File API
 
 		// NICE TO HAVE
