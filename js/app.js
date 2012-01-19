@@ -886,16 +886,22 @@ define(["jquery",
 				return Backbone.sync.call(this, method, model, options);
 			},
 			parse: function(text){
-				var pattern = /{{#t:[^{}]*}}/gm;
+				var pattern = /{{#t:\d+,\d+,[^}]*}}/g;
+				var preamble = /W[\d\.]*, /;
 				var tokens = text.match(pattern);
-				text = text.replace(pattern, "").replace(/W[\d\.]*, /, "");
+				// getting text lengths by splitting up
+				var splits = text.split(pattern);
+				splits.shift();
+				// removing vandalism API annotations
+				text = text.replace(pattern, "").replace(preamble, "");
 				this.set({length: text.length});
 				var revisions = Article.get('revisions');
-				var survived = _.uniq(_.map(tokens, function(token) {
-					var arr = token.replace("{{", "").replace("}}", "").split(",");
-					return parseInt(arr[1]);
-				}));
-				survived = _.map(survived, function(revid) {
+				var counter = {}, revid, revision;
+				_.each(tokens, function(token, index) {
+					revid = parseInt(token.replace("{{", "").replace("}}", "").split(",")[1]);
+					counter[revid] = splits[index].length + counter[revid] || 0;
+				});
+				var survived = _.map(_.keys(counter), function(revid) {
 					return revisions.get(revid);
 				});
 				var editors = _.uniq(_.invoke(survived, 'get', 'user'));
@@ -904,7 +910,7 @@ define(["jquery",
 				if(_.isNumber(sd)) {
 					this.set({sig_dist_survivors: sd});
 				}
-				return {authors: editors, revisions: survived};
+				return {authors: editors, revisions: survived, counter: counter};
 			}
 		});
 
@@ -1726,7 +1732,8 @@ define(["jquery",
 		});
 
 		window.SurvivorView = MapView.extend({
-			title: "Survivors",
+			title: "Text",
+			id: "survivors",
 			render: function() {
 				var m = Article.get('current');
 				if(m && m.has('revisions')) {
@@ -1735,23 +1742,26 @@ define(["jquery",
 					this.row(['span-two-thirds', 'span-one-third']);
 					// counting all surviving revisions
 					var revisions = m.get('revisions');
+					var counter = m.get('counter');
 					var located = [];
 					_.each(revisions, function(r) {
 						if(loc = locations.get(r.get('user'))) {
-							located.push(loc);
+							located.push([loc.get('region'), counter[r.id]]);
 						}
 					});
-					var geoData = _.groupBy(located, function(loc) {
-						return loc.get('region');
+					var geoData = _.groupBy(located, function(arr) {
+						return arr[0];
 					});
 					var geoCount = _.sortBy(_.map(geoData, function(num, key) { 
-						return [key, _.size(num)] 
+						return [key, _.sum(num, function(arr) {return arr[1]})];
 					}), function(num){return num[1]});
 					geoCount.reverse();
 					this.renderMap(geoCount);
 					this.column(2);
 					var total = _.sum(geoCount, function(c){return c[1]});
-					this.textarea('Distribution by country <br/>({0} contributions from {1} countries)'.format(total, _.size(geoCount)), geoCount.join('\n'));
+					this.textarea('Contribution size by country <br/>({0} characters from {1} countries)'.format(total, _.size(geoCount)), geoCount.join('\n'));
+					var ratio = total / m.get('length') * 100;
+					this.display('Text located', "{0}%".format(ratio.toFixed(1)));
 					if(m.has('sig_dist_survivors')) {
 						this.display("Signature distance", "{0} km".format(m.get('sig_dist_survivors').toFixed(3)));
 					}
