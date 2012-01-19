@@ -890,16 +890,21 @@ define(["jquery",
 				var tokens = text.match(pattern);
 				text = text.replace(pattern, "").replace(/W[\d\.]*, /, "");
 				this.set({length: text.length});
-				// FIXME distinguish revision of text introduction
-				var editors = _.uniq(_.map(tokens, function(token) {
-					return token.replace("{{", "").replace("}}", "").split(",")[2];
+				var revisions = Article.get('revisions');
+				var survived = _.uniq(_.map(tokens, function(token) {
+					var arr = token.replace("{{", "").replace("}}", "").split(",");
+					return parseInt(arr[1]);
 				}));
+				survived = _.map(survived, function(revid) {
+					return revisions.get(revid);
+				});
+				var editors = _.uniq(_.invoke(survived, 'get', 'user'));
 				var authors = Article.get('authors');
 				var sd = authors.signatureDistance(editors);
 				if(_.isNumber(sd)) {
 					this.set({sig_dist_survivors: sd});
 				}
-				return {authors: editors};
+				return {authors: editors, revisions: survived};
 			}
 		});
 
@@ -935,9 +940,10 @@ define(["jquery",
 				var allCount = 0;
 				this.each(function(author) {
 					loc = author.get('location');
-					// if "filter" is set, it must be an author property
+					// if authors is set, take only those into account
 					if(loc && (!authors|| _.include(authors, author.id))) {
 						dist = loc.get('distance');
+						// no revision parsing, all authors have edit count
 						count = author.get('count');
 						allCount += count;
 						sd += dist * count;
@@ -1723,15 +1729,19 @@ define(["jquery",
 			title: "Survivors",
 			render: function() {
 				var m = Article.get('current');
-				if(m && m.has('authors')) {
+				if(m && m.has('revisions')) {
 					var locations = Article.get('locations');
 					this.subtitle = "revision: {0} time: {1} user: {2}".format(m.id, m.get('timestamp'), m.get('user'));
 					this.row(['span-two-thirds', 'span-one-third']);
-					var authors = m.get('authors');
-					locations = locations.filter(function(loc) {
-						return _.include(authors, loc.id);
+					// counting all surviving revisions
+					var revisions = m.get('revisions');
+					var located = [];
+					_.each(revisions, function(r) {
+						if(loc = locations.get(r.get('user'))) {
+							located.push(loc);
+						}
 					});
-					var geoData = _.groupBy(locations, function(loc) {
+					var geoData = _.groupBy(located, function(loc) {
 						return loc.get('region');
 					});
 					var geoCount = _.sortBy(_.map(geoData, function(num, key) { 
@@ -1914,7 +1924,7 @@ define(["jquery",
 					_.each(revisions, function(rev, index) {
 						authors = rev.get('authors');
 						if(authors) {
-							// TODO add row for each country 
+							// TODO countries for survived revisions for each day
 						}
 						loc = locations.get(rev.get('user'));
 						if(loc) {
@@ -1927,11 +1937,13 @@ define(["jquery",
 							rows.push([country, rev.get('timestamp'), dist, counter[country].length, undefined]);
 						}
 					});
+
+					// counting countries of survived revisions
 					var current = Article.get('current');
-					authors = current.get('authors');
+					var previous = current.get('revisions');
 					var survival = {};
-					_.each(authors, function(a) {
-						loc = locations.get(a);
+					_.each(previous, function(r) {
+						loc = locations.get(r.get('user'));
 						if(loc) {
 							country = loc.get('region');
 							if(!survival[country]) {
