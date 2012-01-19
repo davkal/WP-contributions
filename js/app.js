@@ -2106,14 +2106,16 @@ define(["jquery",
 				"click #cache": "clearCache",
 				"click #analyze": "analyzeOnClick",
 				"click .example": "analyzeExample",
-				"focus #input": "clear",
+				"focus #input": "focus",
 				"keypress #input": "analyzeOnEnter"
 			},
 			initialize: function() {
 				this.input = this.$("#input");
+				this.$analyze = this.$("#analyze");
 				this.$render = this.$("#renderGroup");
 				this.$continue = this.$("#continueGroup");
 				this.$special = this.$("#special");
+				this.$examples = this.$(".example");
 				this.statusEl = $('#status');
 				this.cache = $('#cache');
 				this.container = $('#content .container');
@@ -2244,6 +2246,8 @@ define(["jquery",
 			},
 			analyzeArticle: function(input) {
 				this.clear();
+				this.$analyze.text('Stop');
+				this.$examples.hide();
 
 				window.Article = new MainArticle({group: this.group});
 				var authors = Article.get('authors');
@@ -2326,6 +2330,10 @@ define(["jquery",
 				}
 				return item;
 			},
+			focus: function() {
+				this.stop();
+				this.clear();
+			},
 			clear: function() {
 				this.status();
 				this.$('section > div').remove();
@@ -2347,7 +2355,7 @@ define(["jquery",
 					.addClass('error');
 				App.status(text);
 			}, 
-			analyze: function(input) {
+			stop: function() {
 				if(window.Group) {
 					Group.unbind();
 				}
@@ -2359,6 +2367,11 @@ define(["jquery",
 						attr.reset && attr.reset();
 					});
 				}
+				this.$analyze.text("Analyze!");
+				this.$examples.show();
+			},
+			analyze: function(input) {
+				this.stop();
 				this.group = input.indexOf(':') >= 0;
 				this.thorough = this.$special.prop('checked');
 				if(this.group) {
@@ -2373,6 +2386,10 @@ define(["jquery",
 				return this.analyzeOnClick();
 			},
 			analyzeOnClick: function(e) {
+				if(this.$analyze.text() == "Stop") {
+					this.stop();
+					return;
+				}
 				var text = this.input.val();
 				if(text) {
 					this.analyze(text);
