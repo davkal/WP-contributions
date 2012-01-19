@@ -468,6 +468,9 @@ define(["jquery",
 				}
 				App.status("Loaded article info.");
 				var page = _.first(_.values(pages));
+				if(res.query.redirects) {
+					page.redirects = res.query.redirects;
+				}
 				if(res.query.export) {
 					var xml = $.parseXML(res.query.export['*']);
 					var text = $(xml).find('text').text();
@@ -826,7 +829,7 @@ define(["jquery",
 
 		window.PageViews = Collection.extend({
 			comparator: function(p) {
-				return p.get('date');
+				return p.get('id');
 			},
 			month: function(d) {
 				return $.format.date(d, "yyyyMM");
@@ -834,25 +837,39 @@ define(["jquery",
 			url: function() {
 				this.current = this.offset || new Date();
 				this.current.setDate(1);
-				var url = "http://stats.grok.se/json/en/{0}/{1}".format(this.month(this.current), Article.get('title').replace(/ /g, "_"));
+				this.title = this.title || Article.get('title');
+				var url = "http://stats.grok.se/json/en/{0}/{1}".format(this.month(this.current), this.title.replace(/ /g, "_"));
 				return PROXY_URL + '?' + $.param({url: url});
 			},
 			parse: function(res) {
-				var views = _.map(res.daily_views, function(v, d) {
-					return {date: d, views: v};
+				var me = this, add;
+				var views = [];
+				_.each(res.daily_views, function(v, d) {
+					// cumulative with previous redirect
+					if(add = me.get(d)) {
+						add.set({views: add.get('views') + v});
+					} else {
+						views.push({id: d, views: v});
+					}
 				});
-				var created = new Date(Article.get('revisions').first().get('timestamp'));
+				var created = Article.get('created');
 				if(this.continue && this.current > created) {
 					this.offset = new Date(this.current);
 					this.offset.setMonth(this.offset.getMonth() - 1);
-					// FIXME check for 0 and replace title with redirect
 					App.status("Page views for {0}...".format(this.month(this.offset)));
 					_.defer(_.bind(this.retrieve, this));
 				} else {
 					views = _.filter(views, function(v) {
-						return new Date(v.date) >= created - MS_PER_DAY;
+						return new Date(v.id) >= created - MS_PER_DAY;
 					});
 					this.offset = null;
+					if(Article.has("redirects")) {
+						var redirects = Article.get("redirects");
+						if(redirects.length) {
+							this.title = redirects.pop().from;
+							_.defer(_.bind(this.retrieve, this));
+						}
+					}
 					App.status();
 				}
 				return views;
@@ -989,7 +1006,6 @@ define(["jquery",
 					return;
 				}
 				var info = _.extract(res, ["first_edit", "count", "editor_count", "anon_count", "last_edit", "minor_count"]);
-				// prelimenary
 				info.created = new Date(info.first_edit.timestamp * 1000);
 				Article.set(info);
 
@@ -1461,8 +1477,7 @@ define(["jquery",
 				if(m.has("first_edit")) {
 					obj = m.get('first_edit');
 					var user = '<a target="u" href="http://{0}.wikipedia.org/wiki/User:{1}">{1}</a>'.format(m.get('lang'), obj.user);
-					text = "{0} by {1}".format(dtformat(new Date(obj.timestamp * 1000)), user);
-					// FIXME timestamp is not UTC
+					text = "{0} by {1}".format(dtformat(m.get('created')), user);
 					this.display("Created", text);
 					this.display('Revision count', "{0} ({1} minor, {2} anonymous)"
 							.format(m.get('count'), m.get('minor_count'), m.get('anon_count')));
@@ -1770,7 +1785,7 @@ define(["jquery",
 		});
 
 		window.GoogleChartView = SectionView.extend({
-			renderTable: function(type, cols, rows, config, onSelect) {
+			renderTable: function(type, cols, rows, config, listeners) {
 				if(_.isString(config)) {
 					config = {title: config};
 				}
@@ -1794,11 +1809,12 @@ define(["jquery",
 					table.addRows(rows);
 				}
 				var ct = this.div(_.uniqueId(type), 'gchart');
-				this.chart = new google.visualization[type](ct);
-				if(onSelect) {
-					google.visualization.events.addListener(this.chart, 'select', onSelect);
-				}
-				this.chart.draw(table, config);
+				var chart = new google.visualization[type](ct);
+				_.each(listeners, function(fun, ev) {
+					google.visualization.events.addListener(chart, ev, fun);
+				});
+				chart.draw(table, config);
+				this.chart = chart;
 				return table;
 			}
 		});
@@ -1828,17 +1844,24 @@ define(["jquery",
 					var views = Article.get('traffic');
 					if(views.length) {
 						views.each(function(v) {
-							rows.push([v.get('date'), undefined, v.get('views')]);
+							rows.push([v.id, undefined, v.get('views')]);
 						})
 					} else {
 						// avoiding NaN values
 						rows.push([start, undefined, 0]);
 					}
-					// FIXME doesnt work with Annotated Timeline
-					var onSelect = function(){
-						var sel = me.chart.getSelection()[0];
-						var revid = table.getValue(sel.row, 2);
-						Article.get('revisions').current(revid);
+					var listeners = {
+						'rangechange': function(){
+							var range = me.chart.getVisibleChartRange();
+							var revisions = Article.get('revisions');
+							var latest = revisions.first();
+							revisions.each(function(r) {
+								if(new Date(r.get('timestamp')) < range.end) {
+									latest = r;
+								}
+							});
+							Article.get('revisions').current(latest.id);
+						}
 					};
 					var config = {
 						scaleType: 'allfixed',
@@ -1846,7 +1869,7 @@ define(["jquery",
 						zoomStartTime: start, 
 						zoomEndTime: end
 					};
-					table = this.renderTable('AnnotatedTimeLine', cols, rows, config, onSelect);
+					table = this.renderTable('AnnotatedTimeLine', cols, rows, config, listeners);
 				}
 				return this;
 			}
@@ -2290,6 +2313,7 @@ define(["jquery",
 				if(results) {
 					// showing only results when cached
 					Article.set({results: results});
+					this.stop();
 				} else {
 					// kick things off
 					Article.set({input: input});
