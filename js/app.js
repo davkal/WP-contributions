@@ -2136,6 +2136,7 @@ define(["jquery",
 						}
 					}
 					this.groupStatus();
+					this.attachGroupEvents();
 				}
 			},
 			groupStatus: function() {
@@ -2147,6 +2148,15 @@ define(["jquery",
 				this.$render.text("{0} results".format(relevant));
 				this.$render.toggleClass('disabled', !done);
 				this.$continue.toggleClass('disabled', !done);
+			},
+			attachGroupEvents: function() {
+				var gv = new GroupHypothesesView;
+				Group.bind('loaded', this.analyzeNext, this);
+				Group.bind('complete', this.clear, this);
+				Group.bind('complete', gv.render, gv);
+				Group.bind('change:summary', function(r) {
+					console.log("Done:", r.get('summary'));
+				});
 			},
 			initAutocomplete: function() {
 				var me = this;
@@ -2181,8 +2191,8 @@ define(["jquery",
 				});
 			},
 			continueGroup: function() {
-				// FIXME move this to analyzeGroup()
 				this.group = true;
+				this.input.val(Group.title);
 				var todo = Group.filter(function(a) { return !a.has('analyzed'); });
 				this.analyzeNext(_.invoke(todo, 'get', 'id'));
 			},
@@ -2226,19 +2236,9 @@ define(["jquery",
 			},
 			analyzeGroup: function(input) {
 				this.clear();
-
 				window.Group = new PageList;
 				this.groupStatus();
-
-				var gv = new GroupHypothesesView;
-
-				Group.bind('loaded', this.analyzeNext, this);
-				Group.bind('complete', this.clear, this);
-				Group.bind('complete', gv.render, gv);
-				Group.bind('change:summary', function(r) {
-					console.log("Done:", r.get('summary'));
-				});
-
+				this.attachGroupEvents();
 				// kicking things off
 				Group.fetchPages(input);
 			},
