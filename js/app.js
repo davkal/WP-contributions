@@ -1830,26 +1830,40 @@ define(["jquery",
 					var cols = [
 						{label: 'Date', type: 'date'},
 						{label: 'Sd(km)', type: 'number'},
+						{label: 'Distance (km)', type: 'number'},
 						{label: 'Page views', type: 'number'}
 					];
+
 					// TODO annotations: day 3, anon <> regs, locals <> distant
 					var rows = _.map(revisions, function(rev, index) {
-						return [rev.get('timestamp'), rev.get('sig_dist'), undefined];
+						return [rev.get('timestamp'), rev.get('sig_dist'), undefined, undefined];
 					});
 					// finding start and end interval for 7 days
 					start = new Date(rows[0][0]);
 					end = new Date(start);
 					end.setDate(end.getDate() + 8);
+
+					// adding individual distances
+					var authors = Article.get('authors'), author, loc;
+					Article.get('revisions').each(function(r) {
+						if(author = authors.get(r.get('user'))) {
+							if(loc = author.get('location')) {
+								rows.push([r.get('timestamp'), undefined, loc.get('distance'), undefined]);
+							}
+						}
+					});
+
 					// adding page views
 					var views = Article.get('traffic');
 					if(views.length) {
 						views.each(function(v) {
-							rows.push([v.id, undefined, v.get('views')]);
+							rows.push([v.id, undefined, undefined, v.get('views')]);
 						})
 					} else {
 						// avoiding NaN values
-						rows.push([start, undefined, 0]);
+						rows.push([start, undefined, undefined, 0]);
 					}
+
 					var listeners = {
 						'rangechange': function(){
 							var range = me.chart.getVisibleChartRange();
