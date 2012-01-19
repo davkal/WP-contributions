@@ -21,7 +21,7 @@ define(["jquery",
 		window.RE_PARENTHESES = /\([^\)]*\)/g;
 		window.RE_WIKI_LINK = /\[\[[^\]]*\]\]/g;
 		window.MS_PER_DAY = 1000 * 60 * 60 * 24;
-		window.PROXY_URL = "http://130344.webhosting31.1blu.de/proxy.php";
+		window.PROXY_URL = "http://154596.webhosting56.1blu.de/proxy.php";
 
 		window.c = function() {
 			console.log(arguments);
@@ -154,7 +154,7 @@ define(["jquery",
 		window.Location = Model.extend({
 			url: function() {
 				// use this global one until I get my own webhosting
-				return 'http://130344.webhosting31.1blu.de/quova/quova.php?ip=' + this.get('ip');
+				return 'http://154596.webhosting56.1blu.de/quova/quova.php?ip=' + this.get('ip');
 			},
 			parse: function(res) {
 				if(!res) {
@@ -890,6 +890,7 @@ define(["jquery",
 				var tokens = text.match(pattern);
 				text = text.replace(pattern, "").replace(/W[\d\.]*, /, "");
 				this.set({length: text.length});
+				// FIXME distinguish revision of text introduction
 				var editors = _.uniq(_.map(tokens, function(token) {
 					return token.replace("{{", "").replace("}}", "").split(",")[2];
 				}));
@@ -1901,15 +1902,20 @@ define(["jquery",
 				var revisions = Article.get('revisions').located();
 				if(_.size(revisions)) {
 					this.row(['span16']);
-					var me = this, rows = [], counter = {}, loc, country, table, dist;
+					var me = this, rows = [], counter = {}, loc, country, table, dist, authors;
 					var cols = [
 						{label: 'Country', type: 'string'},
 						{label: 'Date', type: 'date'},
 						{label: 'Distance (km)', type: 'number'},
-						{label: 'Contributions', type: 'number'}
+						{label: 'Edits (cumulative)', type: 'number'},
+						{label: 'Edits (survived)', type: 'number'}
 					];
 					var locations = Article.get('locations');
 					_.each(revisions, function(rev, index) {
+						authors = rev.get('authors');
+						if(authors) {
+							// TODO add row for each country 
+						}
 						loc = locations.get(rev.get('user'));
 						if(loc) {
 							country = loc.get('region');
@@ -1918,14 +1924,29 @@ define(["jquery",
 								counter[country] = [];
 							}
 							counter[country].push(dist);
-							rows.push([country, rev.get('timestamp'), dist, counter[country].length]);
+							rows.push([country, rev.get('timestamp'), dist, counter[country].length, undefined]);
 						}
 					});
+					var current = Article.get('current');
+					authors = current.get('authors');
+					var survival = {};
+					_.each(authors, function(a) {
+						loc = locations.get(a);
+						if(loc) {
+							country = loc.get('region');
+							if(!survival[country]) {
+								survival[country] = 0;
+							}
+							survival[country]++;
+						}
+					});
+
 					// final shot with all countries and counts
-					var now = new Date(), dists;
+					var now = new Date(), dists, survived;
 					_.each(counter, function(dists, country) {
 						dist = _.sum(dists) / dists.length;
-						rows.push([country, now, dist, dists.length]);
+						survived = survival[country] || 0;
+						rows.push([country, now, dist, dists.length, survived]);
 					});
 
 					var config = {
