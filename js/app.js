@@ -12,7 +12,7 @@ define(["jquery",
 		"order!d3",
 		"order!d3.chart",
 		'async!http://maps.google.com/maps/api/js?sensor=false',
-		'goog!visualization,1,packages:[corechart,geochart,annotatedtimeline]'
+		'goog!visualization,1,packages:[corechart,geochart,annotatedtimeline,motionchart]'
 	], function($, dateFormat, _, Backbone, lz77, DateParser, CoordsParser, countries, botlist, PMCU) {
 
 		window.CACHE_LIMIT = 100 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
@@ -1236,17 +1236,20 @@ define(["jquery",
 				App.status();
 				return page.revisions;
 			},
+			located: function() {
+				var authors = Article.get('authors'), author;
+				return this.filter(function(rev) {
+					author = authors.get(rev.get('user'));
+					return author && author.has('location');
+				});
+			},
 			calcSignatureDistance: function(caller) {
 				if(Article.has('location')) {
-					var authors = Article.get('authors');
-					var located = this.filter(function(rev) {
-						var author = authors.get(rev.get('user'));
-						return author && author.has('location');
-					});
-					var sd, dist;
+					var located = this.located(), sd, dist;
+					var locations = Article.get('locations');
 					// incremental signature distance
 					var localness = _.memoize(function(i, list) {
-						dist = authors.get(list[i].get('user')).get('location').get('distance');
+						dist = locations.get(list[i].get('user')).get('distance');
 						if(i == 0) {
 							return dist;
 						}
@@ -1699,13 +1702,14 @@ define(["jquery",
 					var geoData = _.groupBy(located, function(author) {
 						return author.get('location').get('region');
 					});
-					var geoCount = _.sortBy(_.map(geoData, function(group, region) { 
-						return [region, _.reduce(group, function(memo, author) { return memo + author.get('count');}, 0)] 
+					var geoCount = _.sortBy(_.map(geoData, function(group, region) {
+						return [region, _.sum(group, function(author) { return author.get('count');})];
 					}), function(num){return num[1]});
 					geoCount.reverse();
 					this.renderMap(geoCount);
 					this.column(2);
-					this.textarea('Countries ({0})'.format(_.size(geoCount)), geoCount.join('\n'));
+					var total = _.sum(geoCount, function(c){return c[1]});
+					this.textarea('Distribution by country <br/>({0} contributions from {1} countries)'.format(total, _.size(geoCount)), geoCount.join('\n'));
 					if(Article.has('sig_dist')) {
 						this.display("Signature distance", "{0} km".format(Article.get('sig_dist').toFixed(3)));
 					}
@@ -1735,7 +1739,8 @@ define(["jquery",
 					geoCount.reverse();
 					this.renderMap(geoCount);
 					this.column(2);
-					this.textarea('Countries ({0})'.format(_.size(geoCount)), geoCount.join('\n'));
+					var total = _.sum(geoCount, function(c){return c[1]});
+					this.textarea('Distribution by country <br/>({0} contributions from {1} countries)'.format(total, _.size(geoCount)), geoCount.join('\n'));
 					if(m.has('sig_dist_survivors')) {
 						this.display("Signature distance", "{0} km".format(m.get('sig_dist_survivors').toFixed(3)));
 					}
@@ -1808,7 +1813,7 @@ define(["jquery",
 					});
 					table.addRows(rows);
 				}
-				var ct = this.div(_.uniqueId(type), 'gchart');
+				var ct = this.div(_.uniqueId(type), config.className || 'gchart');
 				var chart = new google.visualization[type](ct);
 				_.each(listeners, function(fun, ev) {
 					google.visualization.events.addListener(chart, ev, fun);
@@ -1878,12 +1883,58 @@ define(["jquery",
 						}
 					};
 					var config = {
+						displayExactValues: true,
 						scaleType: 'allfixed',
 						scaleColumns: [1, 0],
 						zoomStartTime: start, 
 						zoomEndTime: end
 					};
 					table = this.renderTable('AnnotatedTimeLine', cols, rows, config, listeners);
+				}
+				return this;
+			}
+		});
+
+		window.SurvivalMotionView = GoogleChartView.extend({
+			title: "Time",
+			render: function() {
+				var revisions = Article.get('revisions').located();
+				if(_.size(revisions)) {
+					this.row(['span16']);
+					var me = this, rows = [], counter = {}, loc, country, table, dist;
+					var cols = [
+						{label: 'Country', type: 'string'},
+						{label: 'Date', type: 'date'},
+						{label: 'Distance (km)', type: 'number'},
+						{label: 'Contributions', type: 'number'}
+					];
+					var locations = Article.get('locations');
+					_.each(revisions, function(rev, index) {
+						loc = locations.get(rev.get('user'));
+						if(loc) {
+							country = loc.get('region');
+							dist = loc.get('distance');
+							if(!counter[country]) {
+								counter[country] = [];
+							}
+							counter[country].push(dist);
+							rows.push([country, rev.get('timestamp'), dist, counter[country].length]);
+						}
+					});
+					// final shot with all countries and counts
+					var now = new Date(), dists;
+					_.each(counter, function(dists, country) {
+						dist = _.sum(dists) / dists.length;
+						rows.push([country, now, dist, dists.length]);
+					});
+
+					var config = {
+						height: 400,
+						width: 900,
+						className: 'gmotion',
+						state: '{"xZoomedDataMin":3.0587244208838595,"dimensions":{"iconDimensions":["dim0"]},"yZoomedDataMin":1,"yLambda":1,"xZoomedIn":false,"orderedByY":false,"uniColorForNonSelected":false,"nonSelectedAlpha":0.4,"xZoomedDataMax":14719.22872542966,"yZoomedDataMax":149,"xAxisOption":"2","playDuration":15000,"xLambda":1,"colorOption":"_UNIQUE_COLOR","duration":{"timeUnit":"D","multiplier":1},"orderedByX":false,"showTrails":true,"sizeOption":"3","yZoomedIn":false,"yAxisOption":"3","iconKeySettings":[],"time":"2011-02-15","iconType":"BUBBLE"}'
+					};
+					table = this.renderTable('MotionChart', cols, rows, config);
 				}
 				return this;
 			}
@@ -2307,12 +2358,14 @@ define(["jquery",
 					var mv = new MapView();
 					var sv = new SurvivorView();
 					var dv = new LocalnessView();
+					var tv = new SurvivalMotionView();
 
 					Article.bind('change:sig_dist', mv.render, mv);
 
 					authors.bind('loaded', mv.render, mv);
 					authors.bind('done', mv.render, mv);
 					authors.bind('done', sv.render, sv);
+					authors.bind('done', tv.render, tv);
 					authors.bind('done', dv.render, dv);
 
 					revisions.bind('distance', dv.render, dv);
