@@ -2233,7 +2233,6 @@ define(["jquery",
 	});
 	
 	// TODO countries for survived revisions for each day
-	// TODO progress indicator always visible
 	// TODO scatterplot instead of linecharts for hypotheses
 	// TODO display first sentence of article
 	// TODO display if article is relevant
@@ -2253,7 +2252,7 @@ define(["jquery",
 		details: true,
 		events: {
 			"click #renderGroup": "renderGroup",
-			"click #continueGroup": "continueGroup",
+			"click #continueBtn": "continueBtn",
 			"click #cache": "clearCache",
 			"click #analyze": "analyzeOnClick",
 			"click .example": "analyzeExample",
@@ -2264,7 +2263,7 @@ define(["jquery",
 			this.input = this.$("#input");
 			this.$analyze = this.$("#analyze");
 			this.$render = this.$("#renderGroup");
-			this.$continue = this.$("#continueGroup");
+			this.$continue = this.$("#continueBtn");
 			this.$special = this.$("#special");
 			this.$examples = this.$(".example");
 			this.statusEl = $('#status');
@@ -2345,7 +2344,7 @@ define(["jquery",
 				}
 			});
 		},
-		continueGroup: function() {
+		continueBtn: function() {
 			this.group = true;
 			this.input.val(Group.title);
 			var todo = Group.filter(function(a) { return !a.has('analyzed'); });

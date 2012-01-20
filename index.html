@@ -17,10 +17,16 @@
     <style type="text/css">
       body {
 		  background-color: white;
-		 }
+	  }
 		header {
+			position: fixed;
+			top: 40px;
+			width: 100%;
+			z-index: 9999;
 			background-color: whiteSmoke; 
-			margin-top: 40px;
+		}
+		#content {
+			margin-top: 100px;
 		}
 		section .page-header {
 			padding-top: 30px;
@@ -75,9 +81,9 @@
           <ul class="nav">
           </ul>
           <p action="#" class="pull-right">
-            <button class="btn small" id="cache" title="Delete localStorage">Cache</button>
-            <button class="btn disabled small" id="continueGroup" title="Continue group analysis.">Continue</button>
-            <button class="btn disabled small" id="renderGroup" title="Show group results from cache.">Show results</button>
+            <button class="btn small" id="cache" title="Delete local results cache.">Cache</button>
+            <button class="btn disabled small" id="renderGroup" title="Show group results from cache.">Cached results</button>
+            <button class="btn disabled small" id="continueBtn" title="Continue group analysis.">Continue</button>
           </p>
         </div>
       </div>
