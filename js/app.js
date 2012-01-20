@@ -20,6 +20,7 @@ define(["jquery",
 	window.GROUP_DELAY = 1 * 1000; // (ms) time before analyzing next article
 	window.GROUP_KEY = "articleGroup";
 	window.RE_PARENTHESES = /\([^\)]*\)/g;
+	window.RE_SQUARE = /\[[^\]]*\]/g;
 	window.RE_WIKI_LINK = /\[\[[^\]]*\]\]/g;
 	window.MS_PER_DAY = 1000 * 60 * 60 * 24;
 	window.PROXY_URL = "http://154596.webhosting56.1blu.de/proxy.php";
@@ -416,8 +417,8 @@ define(["jquery",
 				// INSIGHT better to parse the HTML than wikitext
 				var text = res.parse.text['*'].replace(/<img[^>]+>/ig, "<img>");
 				var $text = $("<wikitext>{0}</wikitext>".format(text));
-				var paragraph = $text.find('p').first().text();
-				var sentence = paragraph.split('.')[0];
+				var paragraph = $text.children('p').first().text().replace(RE_SQUARE, "");
+				var sentence = paragraph.split('.')[0] + ".";
 				me.set({
 					text: text,
 					sentence: sentence, // 1st
@@ -1685,22 +1686,28 @@ define(["jquery",
 			});
 		},
 		render: function() {
+			this.subtitle = Article.get('title');
+			this.row(['span-two-thirds', 'span-one-third']);
 			var loc = Article.get('location');
+			if(loc && loc.has('latitude')) {
+				this.renderMap(loc);
+			} else {
+				this.display("Location", "No location found for article. Cannot display a map.");
+			}
 			var start = Article.get('start');
 			var end = Article.get('end');
-			if(start || loc && loc.has('latitude')) {
-				this.row(['span-two-thirds', 'span-one-third']);
-				if(loc && loc.has('latitude')) {
-					this.renderMap(loc);
-					this.column(2);
-					this.display('Location', "{0}; {1}".format(loc.get('latitude').toFixed(3), loc.get('longitude').toFixed(3)));
+			this.column(2);
+			this.display("First sentence", Article.get("sentence"));
+			if(loc && loc.has('latitude')) {
+				this.display('Location', "{0}; {1}".format(loc.get('latitude').toFixed(3), loc.get('longitude').toFixed(3)));
+			}
+			if(start) {
+				var end = end && end - start > 10000 ? dformat(end) : "";
+				end = Article.has('ongoing') ? 'ongoing' : end;
+				if(end.length) {
+					end = " - " + end;
 				}
-				if(start) {
-					this.display('Date', dformat(start));
-					if(start && end && end - start > 10000) {
-						this.display('End/Status', Article.has('ongoing') ? 'ongoing' : dformat(end));
-					}
-				}
+				this.display('Date', "{0}{1}".format(dformat(start), end));
 			}
 			return this;
 		}
@@ -2240,7 +2247,6 @@ define(["jquery",
 	
 	// TODO countries for survived revisions for each day
 	// TODO scatterplot instead of linecharts for hypotheses
-	// TODO display first sentence of article
 	// TODO display if article is relevant
 	// TODO continue analysis when not in group mode
 	// TODO hypothesis charts should have H number
