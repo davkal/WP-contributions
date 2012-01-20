@@ -515,7 +515,7 @@ define(["jquery",
 			authors.bind('done', revisions.calcSignatureDistance, revisions);
 			authors.bind('loaded', function() {
 				// skip analysis of irrelevant articles when in group mode
-				if(this.relevant()) {
+				if(!this.has('group') || this.relevant()) {
 					this.calcSignatureDistance();
 					revisions.retrieve();
 					authors.locateUsers();
@@ -2526,6 +2526,7 @@ define(["jquery",
 		},
 		analyze: function(input) {
 			this.stop();
+			this.input.blur();
 			this.group = input.indexOf(':') >= 0;
 			this.thorough = this.$special.prop('checked');
 			if(this.group) {
