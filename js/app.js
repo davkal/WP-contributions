@@ -309,10 +309,12 @@ define(["jquery",
 			// check parsed templates of dates have not been found yet
 			if(!dates && this.has('templates')) {
 				if(infobox = this.get('templates').findByType('infobox')) {
-					if(dateField = infobox.date()) {
-						dates = DateParser.parse(dateField);
-						if(!dates) {
-							console.log("Cannot parse date in infobox ", dateField, Article.toString());
+					if(!infobox.match(/demonym/i)) { // ignore country boxes, fixes articles like Berlin
+						if(dateField = infobox.date()) {
+							dates = DateParser.parse(dateField);
+							if(!dates) {
+								console.log("Cannot parse date in infobox ", dateField, Article.toString());
+							}
 						}
 					}
 				}
@@ -330,7 +332,6 @@ define(["jquery",
 					this.set({ongoing: true});
 				}
 			}
-			// TODO prevent false positive, e.g. "Berlin"
 		},
 		parseLocation: function($text, $infobox) {
 			// location from template
@@ -2399,6 +2400,7 @@ define(["jquery",
 		analyzeArticle: function(input) {
 			this.clear();
 			this.$analyze.text('Stop');
+			this.$analyze.removeClass("primary").addClass("danger");
 			this.$examples.hide();
 
 			window.Article = new MainArticle({group: this.group});
@@ -2495,7 +2497,10 @@ define(["jquery",
 				.parents('.clearfix')
 				.removeClass('error');
 			$('a[href!="#"]', this.nav).remove();
-			this.input.autocomplete('close');
+			var me = this;
+			_.defer(function() {
+				me.input.autocomplete('close');
+			});
 		},
 		link: function(sec) {
 			if(!$('a[href="#{0}"]'.format(sec.id), this.nav).length) {
@@ -2522,6 +2527,7 @@ define(["jquery",
 				});
 			}
 			this.$analyze.text("Analyze!");
+			this.$analyze.removeClass("danger").addClass("primary");
 			this.$examples.show();
 		},
 		analyze: function(input) {
