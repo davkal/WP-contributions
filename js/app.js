@@ -697,7 +697,7 @@ define(["jquery",
 
 			// H7 size of all revs after end
 			if(gr.after) {
-				list = revisions.sample ? _.has(gr.after, 'selected') : gr.after;
+				list = _.has(gr.after, 'selected');
 				if(list.length > 1) {
 					res.after_text_lengths = _.map(list, function(r) {
 						return [r.get('timestamp'), r.get('length')];
@@ -737,7 +737,7 @@ define(["jquery",
 
 			// H10 for all revs during count local and distant survivors
 			if(gr.during) {
-				list = revisions.sample ? _.has(gr.during, 'selected') : gr.during;
+				list = _.has(gr.during, 'selected');
 				if(list.length > 1) {
 					res.during_local_ratios = _.map(list, function(r) {
 						grouped = _.groupBy(r.get('authors'), function(username) {
@@ -756,7 +756,7 @@ define(["jquery",
 
 			// H11 [ts, SD(survivor)] for all revs after end 
 			if(gr.after) {
-				list = revisions.sample ? _.has(gr.after, 'selected') : gr.after;
+				list = _.has(gr.after, 'selected');
 				list = _.has(list, 'sig_dist_survivors');
 				if(list.length > 1) {
 					res.after_sig_dists_survivors = _.map(list, function(r) {
@@ -1544,62 +1544,65 @@ define(["jquery",
 	window.HypothesesView = SectionView.extend({
 		title: "Hypotheses",
 		h1: function(r) {
+			if(!r.h1) {
+				return "n/a (no event date in article)";
+			}
 			return r.delta ? "{0} ({1})".format(r.delta < 3 ? 'True' : 'False', r.delta.toFixed(1)) : "n/a (no start date).";
 		},
 		h3: function(r) {
 			return "{0} ({1})".format(r.first_lang == 'en' ? 'True' : 'False', r.first_lang);
 		},
 		h4: function(r) {
-			if(_.isUndefined(r.creator_dist)) {
+			if(!r.h4) {
 				return "n/a (no creator location).";
 			}
 			return "{0} ({1} km)".format(r.creator_dist <= r.mean_dist ? 'True' : 'False', r.creator_dist.toFixed(1));
 		},
 		h5: function(r) {
-			if(_.isUndefined(r.early_anon_count)) {
+			if(!r.h5) {
 				return "n/a (no early revisions)."
 			}
 			return "{0} ({1} registered, {2} anonymous)".format(r.early_anon_count > r.early_registered_count ? 'True' : 'False', r.early_registered_count, r.early_anon_count);
 		},
 		h6: function(r) {
-			if(_.isUndefined(r.during_local_count)) {
-				return "n/a (no revisions during event)."
+			if(!r.h6) {
+				return "n/a (not enough revisions during event)."
 			}
 			return "{0} ({1} local, {2} distant, {3} unknown)".format(r.during_local_count > r.during_distant_count ? 'True' : 'False', r.during_local_count, r.during_distant_count, r.during_no_location_count);
 		},
 		h7: function(r) {
-			if(_.isUndefined(r.after_text_lengths)) {
+			if(!r.h7) {
 				return "n/a (not enough revisions after event)."
 			}
 			var lr = linearRegression(r.after_text_lengths);
 			return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r < 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
 		},
 		h8: function(r) {
-			if(_.isUndefined(r.after_anon_count)) {
-				return "n/a (no late revisions)."
+			if(!r.h8) {
+				return "n/a (no late revisions or event still ongoing)."
 			}
 			return "{0} ({1} registered, {2} anonymous)".format(r.after_registered_count > r.after_anon_count ? 'True' : 'False', r.after_registered_count, r.after_anon_count);
 		},
 		h9: function(r) {
-			if(_.isUndefined(r.after_sig_dists)) {
-				return "n/a (not enough located revisions after event)."
+			if(!r.h9) {
+				return "n/a (not enough located revisions after event or still ongoing)."
 			}
 			var lr = linearRegression(r.after_sig_dists);
 			return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r > 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
 		},
 		h10: function(r) {
-			if(_.isUndefined(r.during_local_ratios)) {
-				return "n/a (no located revisions during event)."
+			if(!r.h10) {
+				return "n/a (not enough located revisions during event)."
 			}
 			var moreLocals = 0;
 			_.each(r.during_local_ratios, function(arr) {
-				moreLocals +=  arr[1] > arr[2] ? 1 : 0;
+				moreLocals += !arr[2] || (arr[1] > arr[2]) ? 1 : 0;
 			});
 			return "{0} ({1}/{2} revisions with more locals)".format(r.during_local_ratios.length == moreLocals ? 'True' : 'False', moreLocals, r.during_local_ratios.length);
 		},
 		h11: function(r) {
-			if(_.isUndefined(r.after_sig_dists_survivors)) {
-				return "n/a (not enough located revisions after event)."
+			if(!r.h11) {
+				return "n/a (not enough located revisions after event or still ongoing)."
 			}
 			var lr = linearRegression(r.after_sig_dists_survivors);
 			return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r > 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
@@ -1612,54 +1615,62 @@ define(["jquery",
 				return this;
 			}
 			// single article hypotheses
-			this.display('1. Article was created in the first 3 days', this.h1(r));
+			this.display('H1. Article was created in the first 3 days', this.h1(r));
 			// H2 relates to a group of articles
-			this.display('2. Recent articles are created sooner', "n/a (single article).");
-			this.display('3. First article was created in English', this.h3(r));
-			this.display('4. Creator distance was less than mean distance', this.h4(r));
-			this.display('5. Most of early contributors were anonymous', this.h5(r));
-			this.display('6. Most of contributions during the event had distance less than mean', this.h6(r));
-			this.display('7. Revisions are getting smaller in length after event', this.h7(r));
-			this.display('8. Most late contributors were registered users', this.h8(r));
-			this.display('9. Spatial distribution less local after event', this.h9(r));
-			this.display('10. Text consists of more local contributions during event', this.h10(r));
-			this.display('11. Spatial distribution of surviving contribution becomes less local', this.h11(r));
+			this.display('H2. Recent articles are created sooner', "n/a (single article).");
+			this.display('H3. First article was created in English', this.h3(r));
+			this.display('H4. Creator distance was less than mean distance', this.h4(r));
+			this.display('H5. Most of early contributors were anonymous', this.h5(r));
+			this.display('H6. Most of contributions during the event had distance less than mean', this.h6(r));
+			this.display('H7. Revisions are getting smaller in length after event', this.h7(r));
+			this.display('H8. Most late contributors were registered users', this.h8(r));
+			this.display('H9. Spatial distribution less local after event', this.h9(r));
+			this.display('H10. Text consists of more local contributions during event', this.h10(r));
+			this.display('H11. Spatial distribution of surviving contribution becomes less local', this.h11(r));
 
 			this.column(2);
 			var cols, chart;
 
 			// H7 article length chart
-			chart = this.subview(GoogleChartView);
-			cols = [
-				{label: 'Date', type: 'date'},
-				{label: 'Length', type: 'number'}
-			];
-			chart.renderTable('LineChart', cols, r.after_text_lengths, "Text lengths after event");
+			if(r.h7) {
+				chart = this.subview(GoogleChartView);
+				cols = [
+					{label: 'Date', type: 'date'},
+					{label: 'Length', type: 'number'}
+				];
+				chart.renderTable('LineChart', cols, r.after_text_lengths, "H7. Text lengths after event");
+			}
 
 			// H9 sig dists after event chart
-			chart = this.subview(GoogleChartView);
-			cols = [
-				{label: 'Date', type: 'date'},
-				{label: 'Sd(km)', type: 'number'}
-			];
-			chart.renderTable('LineChart', cols, r.after_sig_dists, "Signature distance after event");
+			if(r.h9) {
+				chart = this.subview(GoogleChartView);
+				cols = [
+					{label: 'Date', type: 'date'},
+					{label: 'Sd(km)', type: 'number'}
+				];
+				chart.renderTable('LineChart', cols, r.after_sig_dists, "H9. Signature distance after event");
+			}
 
 			// H10 local vs distant column chart
-			chart = this.subview(GoogleChartView);
-			cols = [
-				{label: 'Date', type: 'date'},
-				{label: 'Local', type: 'number'},
-				{label: 'Distant', type: 'number'}
-			];
-			chart.renderTable('LineChart', cols, r.during_local_ratios, "Contributor localness of text survival during event");
+			if(r.h10) {
+				chart = this.subview(GoogleChartView);
+				cols = [
+					{label: 'Date', type: 'date'},
+					{label: 'Local', type: 'number'},
+					{label: 'Distant', type: 'number'}
+				];
+				chart.renderTable('LineChart', cols, r.during_local_ratios, "H10. Contributor localness of text survival during event");
+			}
 
 			// H11 sig dists survivors after chart
-			chart = this.subview(GoogleChartView);
-			cols = [
-				{label: 'Date', type: 'date'},
-				{label: 'Sd(km)', type: 'number'}
-			];
-			chart.renderTable('LineChart', cols, r.after_sig_dists_survivors, "Signature distance (survivors) after event");
+			if(r.h11) {
+				chart = this.subview(GoogleChartView);
+				cols = [
+					{label: 'Date', type: 'date'},
+					{label: 'Sd(km)', type: 'number'}
+				];
+				chart.renderTable('LineChart', cols, r.after_sig_dists_survivors, "H11. Signature distance (survivors) after event");
+			}
 			
 			return this;
 		}
@@ -1679,7 +1690,7 @@ define(["jquery",
 				mapTypeId: google.maps.MapTypeId.ROADMAP,
 				center: myLatlng
 			};
-			var map = new google.maps.Map(this.div("map_canvas"), myOptions);
+			var map = new google.maps.Map(this.div(_.uniqueId("geoChart"), "gchart"), myOptions);
 			var myMarker = new google.maps.Marker({
 				map: map,
 				position: myLatlng
@@ -2246,10 +2257,8 @@ define(["jquery",
 	});
 	
 	// TODO countries for survived revisions for each day
-	// TODO scatterplot instead of linecharts for hypotheses
 	// TODO display if article is relevant
 	// TODO continue analysis when not in group mode
-	// TODO hypothesis charts should have H number
 	// TODO improve group results overview, for each H say how many qualified
 	// TODO make Locations global for re-use (user pages)
 	// TODO group analysis adds to cache results
