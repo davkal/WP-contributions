@@ -1759,9 +1759,14 @@ define(["jquery",
 					this.renderMap(geoCount);
 					this.column(2);
 					var total = _.sum(geoCount, function(c){return c[1]});
-					this.textarea('Contribution size by country <br/>({0} characters from {1} countries)'.format(total, _.size(geoCount)), geoCount.join('\n'));
-					var ratio = total / m.get('length') * 100;
-					this.display('Text located', "{0}%".format(ratio.toFixed(1)));
+					var length = m.get('length');
+					function ratio(l) {
+						return "{0}%".format((l / length * 100).toFixed(2));
+					}
+					var ratios = _.map(geoCount, function(arr) {
+						return "{0}, {1}".format(arr[0], ratio(arr[1]));
+					});
+					this.textarea('Contribution size by country <br/>(Text length {0}, {1} located, {2} countries)'.format(length, ratio(total), _.size(geoCount)), ratios.join('\n'));
 					if(m.has('sig_dist_survivors')) {
 						this.display("Signature distance", "{0} km".format(m.get('sig_dist_survivors').toFixed(3)));
 					}
