@@ -15,7 +15,7 @@ define(["jquery",
 		'goog!visualization,1,packages:[corechart,geochart,annotatedtimeline,motionchart]'
 	], function($, dateFormat, _, Backbone, lz77, DateParser, CoordsParser, countries, botlist, PMCU) {
 
-		window.CACHE_LIMIT = 100 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
+		window.CACHE_LIMIT = 50 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
 		window.GROUP_DELAY = 1 * 1000; // (ms) time before analyzing next article
 		window.GROUP_KEY = "articleGroup";
 		window.RE_PARENTHESES = /\([^\)]*\)/g;
@@ -33,6 +33,9 @@ define(["jquery",
 		}
 		function dformat(d) {
 			return $.format.date(new Date(d), "yyyy-MM-dd");
+		}
+		function mformat(d) {
+			return $.format.date(new Date(d), "yyyyMM");
 		}
 
 		// Based on http://trentrichardson.com/2010/04/06/compute-linear-regressions-in-javascript/
@@ -90,7 +93,7 @@ define(["jquery",
 				me.fetch({
 					success: function(model, res) {
 						App.setItem(key, res);
-						me.trigger(me.loaded || 'loaded');
+						me.trigger(me.loaded || 'loaded', me);
 					}
 				});
 			}
@@ -129,7 +132,7 @@ define(["jquery",
 					success: function(col, res) {
 						App.setItem(key, res);
 						if(!me.offset) {
-							me.trigger(me.loaded || 'loaded');
+							me.trigger(me.loaded || 'loaded', me);
 						}
 					}
 				});
@@ -512,32 +515,33 @@ define(["jquery",
 				authors.bind('loaded', function() {
 					// skip analysis of irrelevant articles when in group mode
 					if(this.relevant()) {
-						revisions.retrieve();
 						this.calcSignatureDistance();
+						revisions.retrieve();
 						authors.locateUsers();
 					} else {
 						this.trigger('done', this);
 					}
 				}, this);
 
-				revisions.bind('loaded', revisions.calcSignatureDistance, revisions);
-				revisions.bind('loaded', revisions.current, revisions);
-				revisions.bind('loaded', languages.fetchNext, languages);
+				// parallel fetching of languages, users and page views
+				revisions.bind('done', revisions.calcSignatureDistance, revisions);
+				revisions.bind('done', revisions.current, revisions);
+				revisions.bind('done', languages.fetchNext, languages);
+				revisions.bind('done', traffic.retrieve, traffic);
 
 				languages.bind('change', languages.fetchNext, languages);
 				languages.bind('done', function(){this.done('languages')}, this);
 
-				authors.bind('done', function(){this.done('authors')}, this);
+				authors.bind('done', function(){
+					revisions.calcSignatureDistanceSurvivors();
+					this.done('authors');
+				}, this);
 				revisions.bind('distancedone', function(){this.done('revisiondistances')}, this);
 				revisions.bind('authorsdone', function(){this.done('revisionauthors')}, this);
 
 				current.bind('change:id', current.retrieve, current);
 				// trigger to load authors for all remaining revisions
-				if(App.thorough) {
-					current.bind('authors', revisions.fetchAuthors, revisions);
-				} else {
-					this.done('revisionauthors');
-				}
+				current.bind('loaded', revisions.fetchAuthors, revisions);
 
 				this.set({
 					authors: authors,
@@ -831,14 +835,11 @@ define(["jquery",
 			comparator: function(p) {
 				return p.get('id');
 			},
-			month: function(d) {
-				return $.format.date(d, "yyyyMM");
-			},
 			url: function() {
 				this.current = this.offset || new Date();
 				this.current.setDate(1);
 				this.title = this.title || Article.get('title');
-				var url = "http://stats.grok.se/json/en/{0}/{1}".format(this.month(this.current), this.title.replace(/ /g, "_"));
+				var url = "http://stats.grok.se/json/en/{0}/{1}".format(mformat(this.current), this.title.replace(/ /g, "_"));
 				return PROXY_URL + '?' + $.param({url: url});
 			},
 			parse: function(res) {
@@ -856,7 +857,7 @@ define(["jquery",
 				if(this.continue && this.current > created) {
 					this.offset = new Date(this.current);
 					this.offset.setMonth(this.offset.getMonth() - 1);
-					App.status("Page views for {0}...".format(this.month(this.offset)));
+					App.status("Page views for {0}...".format(mformat(this.offset)));
 					_.defer(_.bind(this.retrieve, this));
 				} else {
 					views = _.filter(views, function(v) {
@@ -905,12 +906,16 @@ define(["jquery",
 					return revisions.get(revid);
 				});
 				var editors = _.uniq(_.invoke(survived, 'get', 'user'));
-				var authors = Article.get('authors');
-				var sd = authors.signatureDistance(editors);
-				if(_.isNumber(sd)) {
-					this.set({sig_dist_survivors: sd});
-				}
+				this.calcSignatureDistanceSurvivors(editors);
 				return {authors: editors, revisions: survived, counter: counter};
+			},
+			calcSignatureDistanceSurvivors: function(editors) {
+				var authors = Article.get('authors'), editors, sd;
+				if(editors = this.get('authors') || editors) {
+					if(_.isNumber(sd = authors.signatureDistance(editors))) {
+						this.set({sig_dist_survivors: sd});
+					}
+				}
 			}
 		});
 
@@ -1089,7 +1094,7 @@ define(["jquery",
 						continue: false,
 						limit: 10
 					});
-					revisions.bind('loaded', function() {
+					revisions.bind('done', function() {
 						article.set({revisions: revisions});
 					});
 					revisions.retrieve();
@@ -1207,6 +1212,7 @@ define(["jquery",
 
 		window.RevisionCollection = Collection.extend({
 			model: Revision,
+			loaded: 'done',
 			offset: null,
 			comparator: function(rev) {
 				return rev.get('timestamp');
@@ -1256,6 +1262,11 @@ define(["jquery",
 					return author && author.has('location');
 				});
 			},
+			calcSignatureDistanceSurvivors: function() {
+				this.each(function(r) {
+					r.calcSignatureDistanceSurvivors();
+				});
+			},
 			calcSignatureDistance: function(caller) {
 				if(Article.has('location')) {
 					var located = this.located(), sd, dist;
@@ -1286,17 +1297,13 @@ define(["jquery",
 			fetchAuthors: function() {
 				var me = this;
 				if(!this.sampled) {
-					// limit to one rev per day for text survival analysis
-					var dayed = this.groupBy(function(r) {
-						return dformat(r.get('timestamp'));
+					// limit to one rev per day or month for text survival analysis
+					var chooser = App.thorough ? dformat : mformat;
+					var grouped = this.groupBy(function(r) {
+						return chooser(r.get('timestamp'));
 					});
-					var last;
-					_.each(dayed, function(list, day) {
-						if(App.thorough || !last 
-							|| (new Date(day) - new Date(last)) / MS_PER_DAY >= 7) {
-							list[0].set({selected: true});
-							last = day;
-						}
+					_.each(grouped, function(list) {
+						list[0].set({selected: true});
 					});
 					this.sampled = _.size(this.has('selected'));
 					console.log("Selected revisions for text analysis", this.sampled, this.length);
@@ -2417,7 +2424,6 @@ define(["jquery",
 					authors.bind('done', dv.render, dv);
 
 					revisions.bind('distance', dv.render, dv);
-					revisions.bind('loaded', traffic.retrieve, traffic);
 
 					current.bind('change:authors', sv.render, sv);
 
