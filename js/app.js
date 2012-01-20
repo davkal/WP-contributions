@@ -92,6 +92,9 @@ define(["jquery",
 			var me = this;
 			var key = this.url();
 			me.fetch({
+				error: function(model, res, options) {
+					console.error(res);
+				},
 				success: function(model, res) {
 					App.setItem(key, res);
 					me.trigger(me.loaded || 'loaded', me);
@@ -130,6 +133,9 @@ define(["jquery",
 			var key = this.url();
 			me.fetch({
 				add: !!me.append,
+				error: function(model, res, options) {
+					console.error(res);
+				},
 				success: function(col, res) {
 					App.setItem(key, res);
 					if(!me.offset) {
