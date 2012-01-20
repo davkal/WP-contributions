@@ -603,7 +603,6 @@ define(["jquery",
 			revision = revisions.at(0);
 			res.created = new Date(revision.get('timestamp'));
 			res.start = this.get('start');
-			// TODO disregard when end? was before article was created
 			res.end = this.get('end');
 			// make start,end an open interval
 			res.end.setDate(res.end.getDate() + 1);
@@ -2238,7 +2237,6 @@ define(["jquery",
 	// TODO scatterplot instead of linecharts for hypotheses
 	// TODO display first sentence of article
 	// TODO display if article is relevant
-	// TODO activate buttons only after load
 	// TODO continue analysis when not in group mode
 	// TODO hypothesis charts should have H number
 	// TODO improve group results overview, for each H say how many qualified
@@ -2273,6 +2271,8 @@ define(["jquery",
 			this.cache = $('#cache');
 			this.container = $('#content .container');
 			this.nav = $('.topbar ul.nav');
+			this.$('.search .btn').removeClass('disabled');
+			this.$('.search input').removeAttr('disabled');
 			this.initAutocomplete();
 			this.checkCacheForGroup();
 			this.status();
