@@ -504,7 +504,7 @@ define(["jquery",
 			this.bind('done', this.results, this);
 			this.bind('additional', function() {
 				// skip analysis of irrelevant articles when in group mode
-				if(!this.has('group') || this.relevant()) {
+				if(!this.get('group') || this.relevant()) {
 					authors.retrieve();
 				} else {
 					this.trigger('done', this);
@@ -515,7 +515,7 @@ define(["jquery",
 			authors.bind('done', revisions.calcSignatureDistance, revisions);
 			authors.bind('loaded', function() {
 				// skip analysis of irrelevant articles when in group mode
-				if(!this.has('group') || this.relevant()) {
+				if(!this.get('group') || this.relevant()) {
 					this.calcSignatureDistance();
 					revisions.retrieve();
 					authors.locateUsers();
