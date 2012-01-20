@@ -9,6 +9,7 @@ define(["jquery",
 		"bots", 
 		"pmcu", 
 		"jquery-ui",
+		"date",
 		"order!d3",
 		"order!d3.chart",
 		'async!http://maps.google.com/maps/api/js?sensor=false',
@@ -288,14 +289,14 @@ define(["jquery",
 				// event interval with hcard annotations
 				var $start = $('.dtstart', $infobox);
 				if(start = $start.text()) {
-					start = new Date(start);
+					start = Date.parse(start);
 					var $end = $('.dtend', $infobox);
 					if(end = $end.text()) {
 						// end date present
-						end = new Date(end);
+						end = Date.parse(end);
 					} else if($start.parents('td, p').first().text().match(/(ongoing|present)/)) {
 						// ongoing
-						end = new Date();
+						end = new Date;
 					} else {
 						// single day event
 						end = new Date(start);
