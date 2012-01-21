@@ -17,7 +17,7 @@ define(["jquery",
 	], function($, dateFormat, _, Backbone, lz77, DateParser, CoordsParser, countries, botlist, PMCU) {
 
 	window.CACHE_LIMIT = 50 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
-	window.GROUP_DELAY = 1 * 1000; // (ms) time before analyzing next article
+	window.GROUP_DELAY = 10 * 1000; // (ms) time before analyzing next article
 	window.GROUP_KEY = "articleGroup";
 	window.RE_PARENTHESES = /\([^\)]*\)/g;
 	window.RE_SQUARE = /\[[^\]]*\]/g;
@@ -569,14 +569,16 @@ define(["jquery",
 				this.trigger('done');
 			}
 		},
+		requirements: function() {
+			return {
+				"having a location" : this.has('location'),
+				"having a date" : this.has('start'),
+				"article being created after date" : this.has('start') && (!this.has("created") || dformat(this.get('created')) >= dformat(this.get('start') - MS_PER_DAY)),
+				"date not older than 2002" : this.has('start') && this.get('start').getFullYear() > 2001
+			};
+		},
 		relevant: function() {
-			if(!this.has('location') 
-					|| !this.has('start') 
-					|| this.get('start') > this.get('created')
-					|| this.get('start').getFullYear() < 2001) {
-				return false;
-			}
-			return true;
+			return _.all(this.requirements(), function(v, r) { return v; });
 		},
 		results: function() {
 			if(this.has('results')) {
@@ -664,7 +666,7 @@ define(["jquery",
 
 			// H5 anon/regs count beginning
 			if(_.size(earlies)) {
-				grouped = _.groupBy(gr.beginning, function(r) {
+				grouped = _.groupBy(earlies, function(r) {
 					username = r.get('user');
 					if(author = authors.get(username)) {
 						return author.get('ip') ? 'anon' : 'reg';
@@ -1720,6 +1722,13 @@ define(["jquery",
 				}
 				this.display('Date', "{0}{1}".format(dformat(start), end));
 			}
+			var missed_req = [];
+			_.each(Article.requirements(), function(v, r) {
+				if(!v) {
+					missed_req.push(r);
+				}
+			});
+			this.display("Event criteria", missed_req.length ? "Missing requirements: " + missed_req.join(', ') : "Is event article");
 			return this;
 		}
 	});
@@ -2256,8 +2265,8 @@ define(["jquery",
 		}
 	});
 	
+// FIXME group analysis does not got deep
 	// TODO countries for survived revisions for each day
-	// TODO display if article is relevant
 	// TODO continue analysis when not in group mode
 	// TODO improve group results overview, for each H say how many qualified
 	// TODO make Locations global for re-use (user pages)
@@ -2376,7 +2385,7 @@ define(["jquery",
 			gv.render();
 		},
 		analyzeNext: function(todo) {
-			if(!todo) {
+			if(!todo || _.isObject(todo)) {
 				todo = _.shuffle(Group.pluck('id'));
 				// cache group for stop/continue
 				App.setItem(GROUP_KEY, {title: Group.title, items: Group.toJSON()}, true);
