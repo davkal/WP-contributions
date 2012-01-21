@@ -901,6 +901,10 @@ define(["jquery",
 			return Backbone.sync.call(this, method, model, options);
 		},
 		parse: function(text){
+			var revisions = Article.get('revisions');
+			if(!_.size(revisions)) {
+				return;
+			}
 			var pattern = /{{#t:\d+,\d+,[^}]*}}/g;
 			var preamble = /W[\d\.]*, /;
 			var tokens = text.match(pattern);
@@ -910,7 +914,6 @@ define(["jquery",
 			// removing vandalism API annotations
 			text = text.replace(pattern, "").replace(preamble, "");
 			this.set({length: text.length});
-			var revisions = Article.get('revisions');
 			var counter = {}, revid, revision;
 			_.each(tokens, function(token, index) {
 				revid = parseInt(token.replace("{{", "").replace("}}", "").split(",")[1]);
@@ -1716,6 +1719,9 @@ define(["jquery",
 			});
 		},
 		render: function() {
+			if(!Article.has("title")) {
+				return;
+			}
 			this.subtitle = Article.get('title');
 			this.row(['span-two-thirds', 'span-one-third']);
 			var loc = Article.get('location');
@@ -2304,6 +2310,8 @@ define(["jquery",
 			"click #renderGroup": "renderGroupResults",
 			"click #continueBtn": "continueBtn",
 			"click #cache": "clearCache",
+			"click #stop": "stop",
+			"click #clear": "clear",
 			"click #analyze": "analyzeOnClick",
 			"click .example": "analyzeExample",
 			"focus #input": "focus",
@@ -2312,6 +2320,8 @@ define(["jquery",
 		initialize: function() {
 			this.input = this.$("#input");
 			this.$analyze = this.$("#analyze");
+			this.$clear = this.$("#clear");
+			this.$stop = this.$("#stop");
 			this.$render = this.$("#renderGroup");
 			this.$continue = this.$("#continueBtn");
 			this.$special = this.$("#special");
@@ -2354,10 +2364,8 @@ define(["jquery",
 			this.$continue.toggleClass('disabled', !done);
 		},
 		attachGroupEvents: function() {
-			var gv = new GroupHypothesesView;
 			Group.bind('loaded', this.analyzeNext, this);
-			Group.bind('complete', this.clear, this);
-			Group.bind('complete', gv.render, gv);
+			Group.bind('complete', this.renderGroupResults, this);
 			Group.bind('change:summary', function(r) {
 				console.log("Done:", r.get('summary'));
 			});
@@ -2404,8 +2412,11 @@ define(["jquery",
 			// TODO implement
 		},
 		renderGroupResults: function() {
+			this.reset();
 			var gv = new GroupHypothesesView;
 			gv.render();
+			this.$stop.hide();
+			this.$clear.show();
 		},
 		analyzeNext: function(todo) {
 			if(!todo || !_.isArray(todo)) {
@@ -2417,6 +2428,7 @@ define(["jquery",
 			var next = todo.pop();
 			var me = this;
 			if(next) {
+				App.status("Next article: {0}".format(next));
 				_.debounce(function() {
 					var cached = App.getItem(next);
 					var groupStore = Group.get(next);
@@ -2436,13 +2448,14 @@ define(["jquery",
 					}
 				}, delay)();
 			} else {
+				Article.unbind();
+				Article.clear();
 				console.log("Group analysis complete.");
 				Group.trigger('complete');
 			}
 			this.groupStatus();
 		},
 		analyzeGroup: function(input) {
-			this.clear();
 			window.Group = new PageList;
 			this.groupStatus();
 			this.attachGroupEvents();
@@ -2450,10 +2463,7 @@ define(["jquery",
 			Group.fetchPages(input);
 		},
 		analyzeArticle: function(input) {
-			this.clear();
-			this.$analyze.text('Stop');
-			this.$analyze.removeClass("primary").addClass("danger");
-			this.$examples.hide();
+			this.reset();
 
 			window.Article = new MainArticle({group: this.group});
 			var authors = Article.get('authors');
@@ -2479,6 +2489,10 @@ define(["jquery",
 				var tv = new SurvivalMotionView();
 
 				Article.bind('change:sig_dist', mv.render, mv);
+				Article.bind('complete', function() {
+					this.$stop.hide();
+					this.$clear.show();
+				}, this);
 
 				authors.bind('loaded', mv.render, mv);
 				authors.bind('done', mv.render, mv);
@@ -2533,10 +2547,12 @@ define(["jquery",
 			return item;
 		},
 		focus: function() {
-			this.stop();
-			this.clear();
+			if(this.input.val()) {
+				this.stop();
+			}
+			this.reset();
 		},
-		clear: function() {
+		reset: function() {
 			this.status();
 			this.$('section > div').remove();
 			this.input
@@ -2560,7 +2576,18 @@ define(["jquery",
 				.addClass('error');
 			App.status(text);
 		}, 
+		clear: function() {
+			this.reset();
+			this.$clear.hide();
+			this.$analyze.show();
+			this.$examples.show();
+		},
 		stop: function() {
+			this.wipeout();
+			this.$stop.hide();
+			this.$clear.show();
+		},
+		wipeout: function() {
 			if(window.Group) {
 				Group.unbind();
 			}
@@ -2572,12 +2599,13 @@ define(["jquery",
 					attr.reset && attr.reset();
 				});
 			}
-			this.$analyze.text("Analyze!");
-			this.$analyze.removeClass("danger").addClass("primary");
-			this.$examples.show();
 		},
 		analyze: function(input) {
-			this.stop();
+			this.wipeout();
+			this.reset();
+			this.$examples.hide();
+			this.$analyze.hide();
+			this.$stop.show();
 			this.input.blur();
 			this.group = input.indexOf(':') >= 0;
 			this.thorough = this.$special.prop('checked');
@@ -2593,10 +2621,6 @@ define(["jquery",
 			return this.analyzeOnClick();
 		},
 		analyzeOnClick: function(e) {
-			if(this.$analyze.text() == "Stop") {
-				this.stop();
-				return;
-			}
 			var text = this.input.val();
 			if(text) {
 				this.analyze(text);
