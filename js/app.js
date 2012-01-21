@@ -2289,8 +2289,6 @@ define(["jquery",
 	});
 	
 // FIXME article location: 2007 Georgian demonstrations
-// FIXME stop/analyze/clear should be seperate buttons
-// FIXME Group buttons hide when no group is available
 //
 // TODO countries for survived revisions for each day
 // TODO continue analysis when not in group mode
@@ -2332,6 +2330,7 @@ define(["jquery",
 			this.nav = $('.topbar ul.nav');
 			this.$('.search .btn').removeClass('disabled');
 			this.$('.search input').removeAttr('disabled');
+			this.cache.hover(function() {$(this).addClass('danger');}, function() {$(this).removeClass("danger")});
 			this.initAutocomplete();
 			this.checkCacheForGroup();
 			this.status();
@@ -2349,19 +2348,22 @@ define(["jquery",
 						article.set(this.getItem(key));
 					}
 				}
-				this.groupStatus();
 				this.attachGroupEvents();
 			}
+			this.groupStatus();
 		},
 		groupStatus: function() {
-			var total = Group.length;
-			var done = _.size(Group.has('analyzed'));
-			var relevant = _.size(_.compact(Group.pluck('analyzed')));
+			var total = done = relevant = 0;
+			if(window.Group && window.Group.length) {
+				total = Group.length;
+				done = _.size(Group.has('analyzed'));
+				relevant = _.size(_.compact(Group.pluck('analyzed')));
+				this.$continue.attr('title', "Continue group analysis: {0}".format(Group.title));
+			}
 			this.$continue.text("Continue {0}/{1}".format(done, total));
-			this.$continue.attr('title', "Continue group analysis: {0}".format(Group.title));
 			this.$render.text("{0} results".format(relevant));
-			this.$render.toggleClass('disabled', !done);
-			this.$continue.toggleClass('disabled', !done);
+			this.$render.toggleClass('hidden', !done);
+			this.$continue.toggleClass('hidden', !done);
 		},
 		attachGroupEvents: function() {
 			Group.bind('loaded', this.analyzeNext, this);
@@ -2415,7 +2417,10 @@ define(["jquery",
 			this.reset();
 			var gv = new GroupHypothesesView;
 			gv.render();
+			this.input.val(Group.title);
 			this.$stop.hide();
+			this.$examples.hide();
+			this.$analyze.hide();
 			this.$clear.show();
 		},
 		analyzeNext: function(todo) {
@@ -2521,9 +2526,7 @@ define(["jquery",
 		}, 5000),
 		clearCache: function() {
 			localStorage.clear();
-			this.status();
-			// FIXME reset cache status
-			this.checkCacheForGroup();
+			window.location.reload(true);
 		},
 		setItem: function(key, value, nocheck) {
 			value = JSON.stringify(value);
@@ -2590,6 +2593,7 @@ define(["jquery",
 		wipeout: function() {
 			if(window.Group) {
 				Group.unbind();
+				Group.reset();
 			}
 			if(window.Article) {
 				Article.unbind();
