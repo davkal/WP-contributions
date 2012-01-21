@@ -387,7 +387,7 @@ define(["jquery",
 			});
 
 			// check first paragraph for anything
-			var links = $text.find('p').first().children('a');
+			var links = $text.children('p').first().children('a');
 			_.each(links, function(l) {
 				if(l.title) {
 					candidates.push(l.title.trim());
@@ -402,6 +402,7 @@ define(["jquery",
 			return candidates;
 		},
 		fetchAdditionalData: function() {
+			// getting parsed wikitext, i.e. HTML
 			var me = this;
 			var url = "http://{0}.wikipedia.org/w/api.php?action=parse&format=json&callback=?&".format(this.get('lang'));
 			url += this.has('pageid') ? "pageid=" + this.get('pageid') : "redirects&page=" + encodeURI(this.get('title'));
@@ -2288,8 +2289,6 @@ define(["jquery",
 		}
 	});
 	
-// FIXME article location: 2007 Georgian demonstrations
-//
 // TODO countries for survived revisions for each day
 // TODO continue analysis when not in group mode
 // TODO improve group results overview, for each H say how many qualified
