@@ -17,7 +17,7 @@ define(["jquery",
 	], function($, dateFormat, _, Backbone, lz77, DateParser, CoordsParser, countries, botlist, PMCU) {
 
 	window.CACHE_LIMIT = 50 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
-	window.GROUP_DELAY = 10 * 1000; // (ms) time before analyzing next article
+	window.GROUP_DELAY = 5 * 1000; // (ms) time before analyzing next article
 	window.GROUP_KEY = "articleGroup";
 	window.RE_PARENTHESES = /\([^\)]*\)/g;
 	window.RE_SQUARE = /\[[^\]]*\]/g;
@@ -574,7 +574,8 @@ define(["jquery",
 				"having a location" : this.has('location'),
 				"having a date" : this.has('start'),
 				"article being created after date" : this.has('start') && (!this.has("created") || dformat(this.get('created')) >= dformat(this.get('start') - MS_PER_DAY)),
-				"date not older than 2002" : this.has('start') && this.get('start').getFullYear() > 2001
+				"date not older than 2002" : this.has('start') && this.get('start').getFullYear() > 2001,
+				"not using blacklisted template" : !this.has('templates') || !this.get('templates').hasBlacklisted()
 			};
 		},
 		relevant: function() {
@@ -595,7 +596,8 @@ define(["jquery",
 			if(!this.relevant()) {
 				console.log("Article does not qualify:", title);
 				App.setItem(id, res, true);
-				this.set({results: res});
+				// silent set, dont render useless results
+				this.set({results: res}, {silent: true});
 				this.trigger('complete');
 				return res;
 			}
@@ -1346,6 +1348,16 @@ define(["jquery",
 
 	window.Templates = Collection.extend({
 		model: Template,
+		blacklist: [
+			'governor',
+			'officeholder'
+		],
+		hasBlacklisted: function(){
+			var re = new RegExp("({0})".format(this.blacklist.join("|")), "i");
+			return this.find(function(t) {
+				return t.has('type') && t.get('type').match(re);
+			});
+		},
 		findByType: function(type) {
 			return this.find(function(t) {
 				return t.has('type') && t.get('type').toLowerCase().startsWith(type);
@@ -2265,7 +2277,7 @@ define(["jquery",
 		}
 	});
 	
-// FIXME group analysis does not got deep
+// FIXME article breaks: 2007 Georgian demonstrations
 	// TODO countries for survived revisions for each day
 	// TODO continue analysis when not in group mode
 	// TODO improve group results overview, for each H say how many qualified
@@ -2385,7 +2397,7 @@ define(["jquery",
 			gv.render();
 		},
 		analyzeNext: function(todo) {
-			if(!todo || _.isObject(todo)) {
+			if(!todo || !_.isArray(todo)) {
 				todo = _.shuffle(Group.pluck('id'));
 				// cache group for stop/continue
 				App.setItem(GROUP_KEY, {title: Group.title, items: Group.toJSON()}, true);
