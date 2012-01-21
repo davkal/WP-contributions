@@ -289,11 +289,16 @@ define(["jquery",
 			str.push(location ? location.toString() : "Unknown");
 			return str.join(' ');
 		},
+		parseCategories: function(wikitext) {
+			var pattern = /\[\[Category:([^\]]*)\]\]/gi;
+			return _.map(wikitext.match(pattern), function(match) {
+				return match.replace(pattern, "$1");
+			});
+		},
 		parseDates: function($infobox) {
 			// TODO try collection candidates and then parse then all by first pattern, ...
 			// this would help broken dates that also appear correct in 1st sentence.
 			// e.g. "Start date|1908|28|01" Municipal Library Elevator Coup
-
 			var dates, start, end, infobox, dateField;
 			// event interval with hcard annotations
 			var $start = $('.dtstart', $infobox);
@@ -495,6 +500,7 @@ define(["jquery",
 				$text.find('nowiki').replaceWith('');
 				page.wikitext = $text.text();
 				page.templates = Templates.fromText(page.wikitext);
+				page.categories = this.parseCategories(page.wikitext);
 			}
 			return page;
 		}
@@ -573,12 +579,20 @@ define(["jquery",
 			}
 		},
 		requirements: function() {
+			function checkTemplates(a, list) {
+				return !a.has("templates") || !a.get('templates').hasTemplates(list);
+			}
+			function checkCategories(a, list) {
+				return !a.has("categories") || !_.size(_.intersect(a.get('categories'), list));
+			}
 			return {
 				"having a location" : this.has('location'),
 				"having a date" : this.has('start'),
 				"article being created after date" : this.has('start') && (!this.has("created") || dformat(this.get('created')) >= dformat(this.get('start') - MS_PER_DAY)),
 				"date not older than 2002" : this.has('start') && this.get('start').getFullYear() > 2001,
-				"not using blacklisted template" : !this.has('templates') || !this.get('templates').hasBlacklisted()
+				// potential for a lot of fine tuning
+				"blacklisted category" : checkCategories(this, ['Living people']),
+				"blacklisted template" : checkTemplates(this, ['governor', 'officeholder'])
 			};
 		},
 		relevant: function() {
@@ -1357,12 +1371,8 @@ define(["jquery",
 
 	window.Templates = Collection.extend({
 		model: Template,
-		blacklist: [
-			'governor',
-			'officeholder'
-		],
-		hasBlacklisted: function(){
-			var re = new RegExp("({0})".format(this.blacklist.join("|")), "i");
+		hasTemplates: function(list){
+			var re = new RegExp("({0})".format(list.join("|")), "i");
 			return this.find(function(t) {
 				return t.has('type') && t.get('type').match(re);
 			});
