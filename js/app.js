@@ -195,10 +195,15 @@ define(["jquery",
 			return str;
 		},
 		calcDistance: function(loc) {
-			this.set({distance: Location.geodesicDistance(this, loc)});
+			if(loc) {
+				this.set({distance: Location.geodesicDistance(this, loc)});
+			}
 		}
 	}, {
 		fromArticle: function(candidates, target, signal) {
+			if(!_.size(candidates)) {
+				return target.trigger(signal);
+			}
 			var title = candidates.shift();
 
 			// short cut when country
@@ -219,12 +224,9 @@ define(["jquery",
 						target.set({location: loc});
 						// loc found, no need to search more
 						target.trigger(signal);
-					} else if(candidates.length) {
+					} else {
 						// no location, look for next candidate
 						Location.fromArticle(candidates, target, signal);
-					} else {
-						// no more candidates, giving up
-						target.trigger(signal);
 					}
 				});
 				article.fetchAdditionalData();
@@ -464,7 +466,7 @@ define(["jquery",
 				me.set(attr);
 				// short circuit if this is used as helper page
 				var signal = me.isMain() ? 'additional' : 'done';
-				if(locationCandidates) {
+				if(_.size(locationCandidates)) {
 					//console.log("Trying location candidates", locationCandidates.slice(0));
 					Location.fromArticle(locationCandidates, me, signal);
 				} else {
@@ -922,10 +924,12 @@ define(["jquery",
 			return {authors: editors, revisions: survived, counter: counter};
 		},
 		calcSignatureDistanceSurvivors: function(editors) {
-			var authors = Article.get('authors'), editors, sd;
-			if(editors = this.get('authors') || editors) {
-				if(_.isNumber(sd = authors.signatureDistance(editors))) {
-					this.set({sig_dist_survivors: sd});
+			if(Article.has('location')) {
+				var authors = Article.get('authors'), editors, sd;
+				if(editors = this.get('authors') || editors) {
+					if(!_.isNaN(sd = authors.signatureDistance(editors))) {
+						this.set({sig_dist_survivors: sd});
+					}
 				}
 			}
 		}
@@ -1296,9 +1300,9 @@ define(["jquery",
 					rev.set({sig_dist: sd});
 				});
 				this.trigger('distance', this);
-				if(caller != this) {
-					this.trigger('distancedone', this);
-				}
+			}
+			if(caller != this) {
+				this.trigger('distancedone', this);
 			}
 		},
 		forUser: function(user) {
@@ -2277,17 +2281,20 @@ define(["jquery",
 		}
 	});
 	
-// FIXME article breaks: 2007 Georgian demonstrations
-	// TODO countries for survived revisions for each day
-	// TODO continue analysis when not in group mode
-	// TODO improve group results overview, for each H say how many qualified
-	// TODO make Locations global for re-use (user pages)
-	// TODO group analysis adds to cache results
-	// TODO try File API
+// FIXME article location: 2007 Georgian demonstrations
+// FIXME stop/analyze/clear should be seperate buttons
+// FIXME Group buttons hide when no group is available
+//
+// TODO countries for survived revisions for each day
+// TODO continue analysis when not in group mode
+// TODO improve group results overview, for each H say how many qualified
+// TODO make Locations global for re-use (user pages)
+// TODO group analysis adds to cache results
+// TODO try File API
 
-	// NICE TO HAVE
-	// town in userpages?
-	// you are where you edit
+// NICE TO HAVE
+// town in userpages?
+// you are where you edit
 
 	window.AppView = Backbone.View.extend({
 		el: $("body"),
@@ -2452,7 +2459,7 @@ define(["jquery",
 			var hv = new HypothesesView;
 
 			Article.bind('change:pageid', av.render, av);
-			Article.bind('change:location', pv.render, pv);
+			Article.bind('additional', pv.render, pv);
 			Article.bind('found', av.render, av);
 			Article.bind('change:results', hv.render, hv);
 			authors.bind('loaded', av.render, av);
