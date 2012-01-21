@@ -1339,6 +1339,7 @@ define(["jquery",
 					rev.retrieve();
 				}, 800)();
 			} else {
+				App.status();
 				this.trigger('authorsdone', this);
 			}
 		},
@@ -2300,7 +2301,7 @@ define(["jquery",
 		el: $("body"),
 		details: true,
 		events: {
-			"click #renderGroup": "renderGroup",
+			"click #renderGroup": "renderGroupResults",
 			"click #continueBtn": "continueBtn",
 			"click #cache": "clearCache",
 			"click #analyze": "analyzeOnClick",
@@ -2399,7 +2400,10 @@ define(["jquery",
 			var todo = Group.filter(function(a) { return !a.has('analyzed'); });
 			this.analyzeNext(_.invoke(todo, 'get', 'id'));
 		},
-		renderGroup: function() {
+		renderArticleResults: function() {
+			// TODO implement
+		},
+		renderGroupResults: function() {
 			var gv = new GroupHypothesesView;
 			gv.render();
 		},
@@ -2489,15 +2493,8 @@ define(["jquery",
 				traffic.bind('loaded', dv.render, dv);
 			}
 
-			var results = App.getItem(input);
-			if(results) {
-				// showing only results when cached
-				Article.set({results: results});
-				this.stop();
-			} else {
-				// kick things off
-				Article.set({input: input});
-			}
+			// kick things off
+			Article.set({input: input});
 			return Article;
 		},
 		status: function(msg) {
@@ -2511,6 +2508,7 @@ define(["jquery",
 		clearCache: function() {
 			localStorage.clear();
 			this.status();
+			// FIXME reset cache status
 			this.checkCacheForGroup();
 		},
 		setItem: function(key, value, nocheck) {
