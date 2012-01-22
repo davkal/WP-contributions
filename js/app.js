@@ -94,6 +94,7 @@ define(["jquery",
 			var key = this.url();
 			me.fetch({
 				error: function(model, res, options) {
+					App.error('Some data could no be retrieved.');
 					console.error(res);
 				},
 				success: function(model, res) {
@@ -135,6 +136,7 @@ define(["jquery",
 			me.fetch({
 				add: !!me.append,
 				error: function(model, res, options) {
+					App.error('Some data could no be retrieved.');
 					console.error(res);
 				},
 				success: function(col, res) {
@@ -302,16 +304,19 @@ define(["jquery",
 			var dates, start, end, infobox, dateField;
 			// event interval with hcard annotations
 			var $start = $('.dtstart', $infobox);
-			if(start = $start.text()) {
-				start = Date.parse(start);
+			if($start.length) {
+				start = Date.parse($start.first().text());
+				if($start.length == 2) {
+					end = Date.parse($start.last().text());
+				}
 				var $end = $('.dtend', $infobox);
-				if(end = $end.text()) {
+				if($end.length) {
 					// end date present
-					end = Date.parse(end);
+					end = Date.parse($end.first().text());
 				} else if($start.parents('td, p').first().text().match(/(ongoing|present)/)) {
 					// ongoing
 					end = new Date;
-				} else {
+				} else if(!end){
 					// single day event
 					end = new Date(start);
 					end.setDate(start.getDate() + 1);
@@ -521,7 +526,7 @@ define(["jquery",
 			this.bind('done', this.results, this);
 			this.bind('additional', function() {
 				// skip analysis of irrelevant articles when in group mode
-				if(!this.get('group') || this.relevant()) {
+				if(!this.get('group') || !App.skim && this.relevant()) {
 					authors.retrieve();
 				} else {
 					this.trigger('done', this);
@@ -627,6 +632,13 @@ define(["jquery",
 			res.input = id;
 			res.analyzed = true;
 			res.summary = this.toString();
+
+			if(App.skim) {
+				App.setItem(id, res, true);
+				this.set({results: res}, {silent: true});
+				this.trigger('complete');
+				return res;
+			}
 
 			revision = revisions.at(0);
 			res.created = new Date(revision.get('timestamp'));
@@ -1737,7 +1749,9 @@ define(["jquery",
 			this.row(['span-two-thirds', 'span-one-third']);
 			var loc = Article.get('location');
 			if(loc && loc.has('latitude')) {
-				this.renderMap(loc);
+				if(!App.skim) {
+					this.renderMap(loc);
+				}
 			} else {
 				this.display("Location", "No location found for article. Cannot display a map.");
 			}
@@ -2002,53 +2016,73 @@ define(["jquery",
 			var revisions = Article.get('revisions').located();
 			if(_.size(revisions)) {
 				this.row(['span16']);
-				var me = this, rows = [], counter = {}, loc, country, table, dist, authors;
+				var me = this, rows = [], counter = {}, loc, country, table, dist, count;
 				var cols = [
 					{label: 'Country', type: 'string'},
 					{label: 'Date', type: 'date'},
 					{label: 'Distance (km)', type: 'number'},
 					{label: 'Edits (cumulative)', type: 'number'},
-					{label: 'Edits (survived)', type: 'number'}
+					{label: 'Edits (survived)', type: 'number'},
+					{label: 'Text proportion (%)', type: 'number'}
 				];
+
+				// initialize countries and edits
+				var edits = {}; // country -> cuml. edits
+				var dists = {}; // country -> [dist1, dist2, ...]
 				var locations = Article.get('locations');
-				_.each(revisions, function(rev, index) {
-					authors = rev.get('authors');
-					if(authors) {
-						// TODO countries for survived revisions for each day
-					}
-					loc = locations.get(rev.get('user'));
-					if(loc) {
-						country = loc.get('region');
-						dist = loc.get('distance');
-						if(!counter[country]) {
-							counter[country] = [];
-						}
-						counter[country].push(dist);
-						rows.push([country, rev.get('timestamp'), dist, counter[country].length, undefined]);
-					}
+				_.each(revisions, function(rev) {
+					loc = locations.get(rev.get('user')).get('region');
+					edits[loc] = 0;
+					dists[loc] = [];
 				});
 
-				// counting countries of survived revisions
-				var current = Article.get('current');
-				var previous = current.get('revisions');
-				var survival = {};
-				_.each(previous, function(r) {
-					loc = locations.get(r.get('user'));
-					if(loc) {
-						country = loc.get('region');
-						if(!survival[country]) {
-							survival[country] = 0;
+				// preprocess text survival (not every revision has data)
+				var survivalText = {};
+				var survivalEdits = {};
+				var survived = Article.get('revisions').has('revisions');
+				_.each(survived, function(rev) {
+					var revs = rev.get('revisions');
+					var counter = rev.get('counter');
+					var length = rev.get('length');
+					var date = dformat(rev.get('timestamp'));
+					var characters = _.clone(edits);
+					var editCount = _.clone(edits); 
+					_.each(revs, function(r) {
+						if(loc = locations.get(r.get('user'))) {
+							country = loc.get('region');
+							characters[country] += counter[r.id];
+							editCount[country]++;
 						}
-						survival[country]++;
-					}
+					});
+					// relative values to article length
+					_.each(characters, function(num, country) {
+						characters[country] = num / length * 100;
+					});
+					survivalText[date] = characters;
+					survivalEdits[date] = editCount;
 				});
 
-				// final shot with all countries and counts
-				var now = new Date(), dists, survived;
-				_.each(counter, function(dists, country) {
-					dist = _.sum(dists) / dists.length;
-					survived = survival[country] || 0;
-					rows.push([country, now, dist, dists.length, survived]);
+				var dated = _.groupBy(revisions, function(r) {
+					return dformat(r.get('timestamp'));
+				});
+				var text = {};
+				var revCount = {};
+				_.each(dated, function(revs, d) {
+					// aggregate edits for each date
+					_.each(revs, function(rev) {
+						loc = locations.get(rev.get('user'));
+						country = loc.get('region');
+						edits[country]++;
+						dists[country].push(loc.get('distance'));
+					});
+					// current survival rev
+					text = survivalText[d] || text;
+					revCount = survivalEdits[d] || revCount;
+					// render all countries each day
+					_.each(edits, function(count, country) {
+						dist = _.avg(dists[country]);
+						rows.push([country, d, dist, count, revCount[country] || 0, text[country] || 0]);
+					});
 				});
 
 				var config = {
@@ -2320,6 +2354,7 @@ define(["jquery",
 			"click #stop": "stop",
 			"click #clear": "clear",
 			"click #analyze": "analyzeOnClick",
+			"click #skim": "skim",
 			"click .example": "analyzeExample",
 			"focus #input": "focus",
 			"keypress #input": "analyzeOnEnter"
@@ -2327,6 +2362,7 @@ define(["jquery",
 		initialize: function() {
 			this.input = this.$("#input");
 			this.$analyze = this.$("#analyze");
+			this.$skim = this.$("#skim");
 			this.$clear = this.$("#clear");
 			this.$stop = this.$("#stop");
 			this.$render = this.$("#renderGroup");
@@ -2342,13 +2378,14 @@ define(["jquery",
 			this.cache.hover(function() {$(this).addClass('danger');}, function() {$(this).removeClass("danger")});
 			this.initAutocomplete();
 			this.checkCacheForGroup();
-			this.status();
+			this.status(window.google ? null : "Missing JS libraries.");
 		},
 		checkCacheForGroup: function() {
 			var group = this.getItem(GROUP_KEY);
 			if(group) {
 				window.Group = new PageList(group.items);
 				Group.title = group.title;
+				Group.skim = group.skim;
 				// get results from cache, result is present when key with article ID exists
 				var key, result, article;
 				for(var i = 0; i < localStorage.length; i++) {
@@ -2415,6 +2452,7 @@ define(["jquery",
 		},
 		continueBtn: function() {
 			this.group = true;
+			this.skim = true || Group.skim;
 			this.input.val(Group.title);
 			var todo = Group.filter(function(a) { return !a.has('analyzed'); });
 			this.analyzeNext(_.invoke(todo, 'get', 'id'));
@@ -2436,9 +2474,12 @@ define(["jquery",
 			if(!todo || !_.isArray(todo)) {
 				todo = _.shuffle(Group.pluck('id'));
 				// cache group for stop/continue
-				App.setItem(GROUP_KEY, {title: Group.title, items: Group.toJSON()}, true);
+				App.setItem(GROUP_KEY, {title: Group.title, items: Group.toJSON(), skim: App.skim}, true);
 			}
 			var delay = Group.length == todo.length ? 0 : GROUP_DELAY;
+			if(App.skim) {
+				delay = delay / 10;
+			}
 			var next = todo.pop();
 			var me = this;
 			if(next) {
@@ -2515,6 +2556,7 @@ define(["jquery",
 				authors.bind('done', dv.render, dv);
 
 				revisions.bind('distance', dv.render, dv);
+				revisions.bind('authorsdone', tv.render, tv);
 
 				current.bind('change:authors', sv.render, sv);
 
@@ -2613,7 +2655,12 @@ define(["jquery",
 				});
 			}
 		},
-		analyze: function(input) {
+		skim: function() {
+			this.$skim.hide();
+			this.analyze(this.input.val(), true);
+		},
+		analyze: function(input, skim) {
+			App.skim = !!skim;
 			this.wipeout();
 			this.reset();
 			this.$examples.hide();
@@ -2640,12 +2687,23 @@ define(["jquery",
 			}
 			return false;
 		},
-		analyzeOnEnter: function(e) {
+		analyzeOnEnter: _.throttle(function(e) {
 			var text = this.input.val();
-			if (!text || (e.keyCode != 13)) return;
+			if(!text) {
+				return;
+			}
+			var group = text.indexOf(':') >= 0;
+			if(group) {
+				this.$skim.show();
+			} else {
+				this.$skim.hide();
+			}
+			if (group || (e.keyCode != 13)) {
+				return;
+			}
 			this.analyze(text);
 			return false;
-		}
+		}, 1000)
 	});
 
 

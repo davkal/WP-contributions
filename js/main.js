@@ -42,6 +42,9 @@ require(["jquery",
 		window._ = _;
 
 		_.mixin({
+			avg: function(list) {
+				return _.sum(list) / _.size(list);
+			},
 			has: function(list, property) {
 				return _.filter(list, function(i){return i.has(property)});
 			}, 
