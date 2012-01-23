@@ -306,23 +306,25 @@ define(["jquery",
 			var $start = $('.dtstart', $infobox);
 			if($start.length) {
 				start = Date.parse($start.first().text());
-				if($start.length == 2) {
-					end = Date.parse($start.last().text());
-				}
-				var $end = $('.dtend', $infobox);
-				if($end.length) {
-					// end date present
-					end = Date.parse($end.first().text());
-				} else if($start.parents('td, p').first().text().match(/(ongoing|present)/)) {
-					// ongoing
-					end = new Date;
-				} else if(!end){
-					// single day event
-					end = new Date(start);
-					end.setDate(start.getDate() + 1);
-				}
-				if(!isNaN(start.getTime()) && !isNaN(end.getTime())) {
-					dates = [start, end];
+				if(start) {
+					if($start.length == 2) {
+						end = Date.parse($start.last().text());
+					}
+					var $end = $('.dtend', $infobox);
+					if($end.length) {
+						// end date present
+						end = Date.parse($end.first().text());
+					} else if($start.parents('td, p').first().text().match(/(ongoing|present)/)) {
+						// ongoing
+						end = new Date;
+					} else if(!end){
+						// single day event
+						end = new Date(start);
+						end.setDate(start.getDate() + 1);
+					}
+					if(!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+						dates = [start, end];
+					}
 				}
 			}
 			// check parsed templates of dates have not been found yet
@@ -2333,8 +2335,8 @@ define(["jquery",
 		}
 	});
 	
-// TODO countries for survived revisions for each day
-// TODO continue analysis when not in group mode
+// TODO stats on PCMU
+// TODO stats on userpages
 // TODO improve group results overview, for each H say how many qualified
 // TODO make Locations global for re-use (user pages)
 // TODO group analysis adds to cache results
