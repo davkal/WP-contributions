@@ -1443,6 +1443,7 @@ define(["jquery",
 		},
 		display: function(label, value) {
 			this.form.append('<div class="clearfix"><label>' + label + '</label><div class="input"><p>' + value + '</p></div></div>');
+			return $(".input p", this.form).last();
 		},
 		link: function(label, value, href) {
 			this.display(label, '<a href="{0}" target="_blank">{1}</a>'.format(href, value));
@@ -1451,7 +1452,7 @@ define(["jquery",
 			$(field).parent('.input').prev('label').text(text);
 		},
 		textarea: function(label, value, rows) {
-			rows = rows || 7;
+			rows = rows || 9;
 			this.form.append('<div class="clearfix"><label>{0}</label><div class="input"><textarea class="xlarge" rows="{1}">{2}</textarea></div></div>'
 				.format(label, rows, value));
 			return $('textarea', this.form).last();
@@ -1507,19 +1508,20 @@ define(["jquery",
 	window.LanguageView = FieldView.extend({
 		render: function() {
 			if(this.model) {
-				if(!this.field) {
-					this.field = this.textarea("Languages ({0})".format(_.size(this.model)), "");
-				}
 				var loaded = this.model.filter(function(a) {
 					return a.has('revisions');
 				});
-				loaded = _.sortBy(loaded, function(a) {
+				var first = _.first(_.sortBy(loaded, function(a) {
 					return a.get('revisions').first().get('timestamp');
-				});
-				var list = _.map(loaded, function(a) {
-					return "{0}: {1}".format(a.get('lang'), a.get('revisions').first().get('timestamp'));
-				});
-				this.field.val(list.join("\n"));
+				}));
+				if(first) {
+					if(!this.field) {
+						this.field = this.display("Appeared first in language", "");
+					}
+					var lang = first.get('lang');
+					var ts = first.get('revisions').first().get('timestamp');
+					this.field.text("{0} at {1}".format(lang, dtformat(ts)));
+				}
 			}
 		}
 	});
@@ -1528,31 +1530,46 @@ define(["jquery",
 		changeEvent: 'change:location',
 		render: function() {
 			if(this.model) {
-				var located = this.model.filter(function(author) {
-					return author.has('location');
+				var name;
+				var located = 0;
+				var authors = this.model.map(function(author) {
+					name = author.id;
+					if(author.has('location')) {
+						name += " (located)";
+						located++;
+					}
+					return name;
 				});
-				var label = "Located ({0})".format(_.size(located));
+				var all = this.model.size();
+				var ratio = located / all * 100;
+				var label = "Contributors ({0}, {1}% located)".format(all, ratio.toFixed(1));
 				if(!this.field) {
 					this.field = this.textarea(label, "");
 				} else {
 					this.label(this.field, label);
 				}
-				this.field.val(_.pluck(located, 'id').join("\n"));
+				this.field.val(authors.join("\n"));
 			}
 		}
 	});
 
 	window.Overview = SectionView.extend({
-		title: "Overview",
+		title: "Article",
+		id: "overview",
 		render: function() {
-			this.row(['span-one-third', 'span-one-third', 'span-one-third']);
 			var m = Article;
+			this.row(['span-one-third', 'span-one-third', 'span-one-third']);
+			this.subtitle = m.get('title');
+			this.link("Article ID", "{0} ({1})".format(m.get('pageid'), m.get('lang')), "http://{0}.wikipedia.org/wiki/{1}".format(m.get('lang'), m.get('title')));
+			if(m.has('sentence')) {
+				this.display('First sentence', m.get('sentence'));
+			}
+
 			var authors = m.get('authors');
 			var bots = m.get('bots');
 			var text, obj;
-			this.link("Title", "{0} ({1})".format(m.get('title'), m.get('lang')), "http://{0}.wikipedia.org/wiki/{1}".format(m.get('lang'), m.get('title')));
-			this.display("Article ID", m.get('pageid'));
 			if(m.has("first_edit")) {
+				this.column(2);
 				obj = m.get('first_edit');
 				var user = '<a target="u" href="http://{0}.wikipedia.org/wiki/User:{1}">{1}</a>'.format(m.get('lang'), obj.user);
 				text = "{0} by {1}".format(dtformat(m.get('created')), user);
@@ -1562,28 +1579,13 @@ define(["jquery",
 				var ips = _.size(_.compact(authors.pluck('ip')));
 				var bots = _.size(_.compact(bots.pluck('count')));
 				this.display('Contributors', "{0} ({1} IPs, {2} bots)".format(m.get('editor_count'), ips, bots));
-			}
-			this.display("Last edited", m.get('touched'));
-			if(_.size(authors)) {
-				this.column(2);
-				var located = [];
-				var editors = [];
-				var ips = 0;
-				var name;
-				authors.each(function(author) {
-					name = author.id;
-					if(author.has('location')) {
-						located.push(name);
-					}
-					editors.push(name);
-				});
-				this.textarea('Contributors ({0})'.format(_.size(editors)), editors.join('\n'));
-				this.textarea('Content ({0})'.format(Article.get('length')), _.escape(Article.get('wikitext')));
-				this.column(3);
-				this.subview(LocatedView, authors);
 				this.subview(LanguageView, Article.get('languages'));
 			}
 
+			if(_.size(authors)) {
+				this.column(3);
+				this.subview(LocatedView, authors);
+			}
 			return this;
 		}
 	});
@@ -1725,7 +1727,8 @@ define(["jquery",
 
 	window.PropertiesView = SectionView.extend({
 		id: "properties",
-		title: "Article",
+		title: "Event",
+		subtitle: "Geographic location of article",
 		renderMap: function(loc) {
 			var myLatlng = new google.maps.LatLng(loc.get('latitude'), loc.get('longitude'));
 			var myOptions = {
@@ -1737,7 +1740,7 @@ define(["jquery",
 				mapTypeId: google.maps.MapTypeId.ROADMAP,
 				center: myLatlng
 			};
-			var map = new google.maps.Map(this.div(_.uniqueId("geoChart"), "gchart"), myOptions);
+			var map = new google.maps.Map(this.div(_.uniqueId("geoChart"), "gmap"), myOptions);
 			var myMarker = new google.maps.Marker({
 				map: map,
 				position: myLatlng
@@ -1747,7 +1750,6 @@ define(["jquery",
 			if(!Article.has("title")) {
 				return;
 			}
-			this.subtitle = Article.get('title');
 			this.row(['span-two-thirds', 'span-one-third']);
 			var loc = Article.get('location');
 			if(loc && loc.has('latitude')) {
@@ -1760,7 +1762,6 @@ define(["jquery",
 			var start = Article.get('start');
 			var end = Article.get('end');
 			this.column(2);
-			this.display("First sentence", Article.get("sentence"));
 			if(loc && loc.has('latitude')) {
 				this.display('Location', "{0}; {1}".format(loc.get('latitude').toFixed(3), loc.get('longitude').toFixed(3)));
 			}
@@ -1770,7 +1771,7 @@ define(["jquery",
 				if(end.length) {
 					end = " - " + end;
 				}
-				this.display('Date', "{0}{1}".format(dformat(start), end));
+				this.display('Event date', "{0}{1}".format(dformat(start), end));
 			}
 			var missed_req = [];
 			_.each(Article.requirements(), function(v, r) {
@@ -1778,13 +1779,15 @@ define(["jquery",
 					missed_req.push(r);
 				}
 			});
-			this.display("Event criteria", missed_req.length ? "Missing requirements: " + missed_req.join(', ') : "Is event article");
+			this.display("Missing event requirements", missed_req.length ? missed_req.join(', ') : "None, this article seems to treat an event.");
 			return this;
 		}
 	});
 
 	window.MapView = SectionView.extend({
-		title: "Distribution",
+		id: "distribution",
+		title: "Origins",
+		subtitle: "Geographic origin of edits",
 		renderMap: function(rows) {
 			var table = new google.visualization.DataTable();
 			table.addColumn('string', 'Region');
@@ -1829,7 +1832,7 @@ define(["jquery",
 			var m = Article.get('current');
 			if(m && m.has('revisions')) {
 				var locations = Article.get('locations');
-				this.subtitle = "revision: {0} time: {1} user: {2}".format(m.id, m.get('timestamp'), m.get('user'));
+				this.subtitle = "Geographic origin of survived text in revision {0} by {1} - {2}".format(m.id, m.get('user'), dtformat(m.get('timestamp')));
 				this.row(['span-two-thirds', 'span-one-third']);
 				// counting all surviving revisions
 				var revisions = m.get('revisions');
@@ -1942,7 +1945,9 @@ define(["jquery",
 	});
 
 	window.LocalnessView = GoogleChartView.extend({
-		title: "Localness",
+		title: "Activity",
+		id: 'localness',
+		subtitle: "Distances vs. page views",
 		render: function() {
 			var revisions = Article.get('revisions').has('sig_dist');
 			if(_.size(revisions)) {
@@ -2013,7 +2018,9 @@ define(["jquery",
 	});
 
 	window.SurvivalMotionView = GoogleChartView.extend({
-		title: "Time",
+		id: 'time',
+		title: "Evolution",
+		subtitle: "Temporal development of contributions by country",
 		render: function() {
 			var revisions = Article.get('revisions').located();
 			if(_.size(revisions)) {
@@ -2538,9 +2545,11 @@ define(["jquery",
 			var hv = new HypothesesView;
 
 			Article.bind('change:pageid', av.render, av);
+			Article.bind('additional', av.render, av);
 			Article.bind('additional', pv.render, pv);
 			Article.bind('found', av.render, av);
 			Article.bind('change:results', hv.render, hv);
+
 			authors.bind('loaded', av.render, av);
 
 			if(!this.group && google.visualization) { // goole stuff sometimes fails to load
@@ -2581,9 +2590,9 @@ define(["jquery",
 			this.statusEl.text(msg || "Ready.");
 			this.cacheStatus();
 		},
-		cacheStatus: _.throttle(function() {
+		cacheStatus: _.debounce(function() {
 			var size = JSON.stringify(localStorage).length / 1024 / 1024;
-			this.cache.text("Cache {0} MB".format(size.toFixed(2)));
+			App.cache.text("Cache {0} MB".format(size.toFixed(2)));
 		}, 5000),
 		clearCache: function() {
 			localStorage.clear();
@@ -2622,17 +2631,17 @@ define(["jquery",
 			this.input
 				.parents('.clearfix')
 				.removeClass('error');
-			$('a[href!="#"]', this.nav).remove();
+			$('a[href!="#"]', this.nav).addClass('hidden');
 			var me = this;
 			_.defer(function() {
 				me.input.autocomplete('close');
 			});
 		},
 		link: function(sec) {
-			if(!$('a[href="#{0}"]'.format(sec.id), this.nav).length) {
-				this.nav.append('<li><a href="#' + sec.id +'">' + sec.title + '</a></li>');
-				$('body').scrollSpy('refresh');
-			}
+			$('a[href="#{0}"]'.format(sec.id), this.nav)
+				.removeClass('hidden')
+				.text(sec.title);
+			$('body').scrollSpy('refresh');
 		},
 		error: function(text) {
 			$('#input')
