@@ -2455,6 +2455,14 @@ define(["jquery",
 			this.skim = true || Group.skim;
 			this.input.val(Group.title);
 			var todo = Group.filter(function(a) { return !a.has('analyzed'); });
+			var key, result, article;
+			// clear cache from non-group items
+			for(var i = 0; i < localStorage.length; i++) {
+				key = localStorage.key(i);
+				if(key != GROUP_KEY && !Group.get(key)) {
+					localStorage.removeItem(key);
+				}
+			}
 			this.analyzeNext(_.invoke(todo, 'get', 'id'));
 		},
 		renderArticleResults: function() {
