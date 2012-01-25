@@ -23,6 +23,7 @@ define(["jquery",
 	window.RE_SQUARE = /\[[^\]]*\]/g;
 	window.RE_WIKI_LINK = /\[\[[^\]]*\]\]/g;
 	window.MS_PER_DAY = 1000 * 60 * 60 * 24;
+	window.CREATED_TOLERANCE = 3 * MS_PER_DAY;
 	window.PROXY_URL = "http://154596.webhosting56.1blu.de/proxy.php";
 
 	window.c = function() {
@@ -597,7 +598,7 @@ define(["jquery",
 			return {
 				"having a location" : this.has('location'),
 				"having a date" : this.has('start'),
-				"article being created after date" : this.has('start') && (!this.has("created") || dformat(this.get('created')) >= dformat(this.get('start') - MS_PER_DAY)),
+				"article being created after date" : this.has('start') && (!this.has("created") || dformat(this.get('created')) >= dformat(this.get('start') - CREATED_TOLERANCE)),
 				"date not older than 2002" : this.has('start') && this.get('start').getFullYear() > 2001,
 				// potential for a lot of fine tuning
 				"blacklisted category" : checkCategories(this, ['Living people']),
