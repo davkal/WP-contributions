@@ -95,7 +95,7 @@ define(["jquery",
 			me.fetch({
 				error: function(model, res, options) {
 					App.error('Some data could no be retrieved.');
-					console.error(res);
+					console.error(arguments);
 				},
 				success: function(model, res) {
 					App.setItem(key, res);
@@ -137,7 +137,7 @@ define(["jquery",
 				add: !!me.append,
 				error: function(model, res, options) {
 					App.error('Some data could no be retrieved.');
-					console.error(res);
+					console.error(arguments);
 				},
 				success: function(col, res) {
 					App.setItem(key, res);
@@ -552,7 +552,9 @@ define(["jquery",
 			revisions.bind('done', revisions.calcSignatureDistance, revisions);
 			revisions.bind('done', revisions.current, revisions);
 			revisions.bind('done', languages.fetchNext, languages);
-			revisions.bind('done', traffic.retrieve, traffic);
+			if(!this.get('group')) {
+				revisions.bind('done', traffic.retrieve, traffic);
+			}
 
 			languages.bind('change', languages.fetchNext, languages);
 			languages.bind('done', function(){this.done('languages')}, this);
@@ -1558,6 +1560,9 @@ define(["jquery",
 		id: "overview",
 		render: function() {
 			var m = Article;
+			if(!m.get('pageid')) {
+				return;
+			}
 			this.row(['span-one-third', 'span-one-third', 'span-one-third']);
 			this.subtitle = m.get('title');
 			this.link("Article ID", "{0} ({1})".format(m.get('pageid'), m.get('lang')), "http://{0}.wikipedia.org/wiki/{1}".format(m.get('lang'), m.get('title')));
@@ -2360,6 +2365,7 @@ define(["jquery",
 			"click #renderGroup": "renderGroupResults",
 			"click #continueBtn": "continueBtn",
 			"click #cache": "clearCache",
+			"click #download": "download",
 			"click #stop": "stop",
 			"click #clear": "clear",
 			"click #analyze": "analyzeOnClick",
@@ -2371,6 +2377,7 @@ define(["jquery",
 		initialize: function() {
 			this.input = this.$("#input");
 			this.$analyze = this.$("#analyze");
+			this.$download = this.$("#download");
 			this.$skim = this.$("#skim");
 			this.$clear = this.$("#clear");
 			this.$stop = this.$("#stop");
@@ -2388,6 +2395,9 @@ define(["jquery",
 			this.initAutocomplete();
 			this.checkCacheForGroup();
 			this.status(window.google ? null : "Missing JS libraries.");
+		},
+		download: function() {
+			window.open('data:text/json;charset=utf-8,' + JSON.stringify(Group));
 		},
 		checkCacheForGroup: function() {
 			var group = this.getItem(GROUP_KEY);
@@ -2460,8 +2470,11 @@ define(["jquery",
 			});
 		},
 		continueBtn: function() {
+			this.$analyze.hide();
+			this.$examples.hide();
+			this.$stop.show();
 			this.group = true;
-			this.skim = true || Group.skim;
+			this.skim = Group.skim;
 			this.input.val(Group.title);
 			var todo = Group.filter(function(a) { return !a.has('analyzed'); });
 			var key, result, article;
@@ -2486,6 +2499,7 @@ define(["jquery",
 			this.$examples.hide();
 			this.$analyze.hide();
 			this.$clear.show();
+			this.$download.show();
 		},
 		analyzeNext: function(todo) {
 			if(!todo || !_.isArray(todo)) {
@@ -2631,7 +2645,9 @@ define(["jquery",
 			this.input
 				.parents('.clearfix')
 				.removeClass('error');
-			$('a[href!="#"]', this.nav).addClass('hidden');
+			$('a[href!="#"]', this.nav)
+				.parent()
+				.addClass('hidden');
 			var me = this;
 			_.defer(function() {
 				me.input.autocomplete('close');
@@ -2639,8 +2655,9 @@ define(["jquery",
 		},
 		link: function(sec) {
 			$('a[href="#{0}"]'.format(sec.id), this.nav)
-				.removeClass('hidden')
-				.text(sec.title);
+				.text(sec.title)
+				.parent()
+				.removeClass('hidden');
 			$('body').scrollSpy('refresh');
 		},
 		error: function(text) {
@@ -2654,6 +2671,7 @@ define(["jquery",
 			this.$clear.hide();
 			this.$analyze.show();
 			this.$examples.show();
+			this.$download.hide();
 		},
 		stop: function() {
 			this.wipeout();
@@ -2729,6 +2747,7 @@ define(["jquery",
 	return {
 		init: function() {
 			window.App = new AppView;
+			window.PMCU = PMCU;
 
 			/* runtime 4h
 			locateIP = _.debounce(function() {
