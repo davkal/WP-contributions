@@ -2112,6 +2112,32 @@ define(["jquery",
 		}
 	});
 
+	window.GroupResultsView = SectionView.extend({
+		title: "Group",
+		id: "groupresults",
+		render: function() {
+			var g = Group;
+			var results = g.has('analyzed');
+			this.row(['span-one-third', 'span-one-third', 'span-one-third']);
+			this.link("Article group", g.title, "http://{0}.wikipedia.org/wiki/{1}".format('en', g.title));
+			if(results.length == 0) {
+				this.display("Article group empty", "No articles were found that qualify for analysis.");
+			} else {
+				var list, func, title;
+				var grouped = _.groupBy(results, function(a) {
+					return a.get('analyzed') ? 'relevant' : 'skipped';
+				});
+				this.column(2);
+				list = _.map(grouped.relevant || [], function(a){return a.get('title')});
+				this.textarea('Articles relevant ({0})'.format(_.size(list)), list.join('\n'));
+				this.column(3);
+				list = _.map(grouped.skipped || [], function(a){return a.get('title')});
+				this.textarea('Articles skipped ({0})'.format(_.size(list)), list.join('\n'));
+			}
+		}
+	});
+
+
 	window.GroupHypothesesView = SectionView.extend({
 		title: "Hypotheses",
 		h1: function(results, title, subtitle) {
@@ -2288,22 +2314,7 @@ define(["jquery",
 		render: function() {
 			var g = Group;
 			var results = g.has('analyzed');
-			this.row(['span-one-third', 'span-one-third', 'span-one-third']);
-			this.link("Article group", g.title, "http://{0}.wikipedia.org/wiki/{1}".format('en', g.title));
-			if(results.length == 0) {
-				this.display("Article group empty", "No articles were found that qualify for analysis.");
-			} else {
-				var list, func, title;
-				var grouped = _.groupBy(results, function(a) {
-					return a.get('analyzed') ? 'relevant' : 'skipped';
-				});
-				this.column(2);
-				list = _.map(grouped.relevant || [], function(a){return a.get('title')});
-				this.textarea('Articles relevant ({0})'.format(_.size(list)), list.join('\n'));
-				this.column(3);
-				list = _.map(grouped.skipped || [], function(a){return a.get('title')});
-				this.textarea('Articles skipped ({0})'.format(_.size(list)), list.join('\n'));
-
+			if(results.length) {
 				// render all hypotheses H1 - H11
 				var hs = [
 					// H1
@@ -2329,6 +2340,7 @@ define(["jquery",
 					// H11
 					"After an event has ended, the spatial distribution of the surviving contributions will become less local."
 				];
+				var list, func, title;
 				_.each(hs, function(subtitle, i) {
 					func = "h{0}".format(i + 1);
 					// pre-filtering for relevant results for each H
@@ -2348,6 +2360,8 @@ define(["jquery",
 		}
 	});
 	
+// TODO local means same country
+// TODO SD by text ratio
 // TODO stats on PCMU
 // TODO stats on userpages
 // TODO improve group results overview, for each H say how many qualified
@@ -2493,6 +2507,8 @@ define(["jquery",
 		},
 		renderGroupResults: function() {
 			this.reset();
+			var gr = new GroupResultsView;
+			gr.render();
 			var gv = new GroupHypothesesView;
 			gv.render();
 			this.input.val(Group.title);
