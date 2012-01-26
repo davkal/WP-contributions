@@ -2117,22 +2117,39 @@ define(["jquery",
 		id: "groupresults",
 		render: function() {
 			var g = Group;
-			var results = g.has('analyzed');
-			this.row(['span-one-third', 'span-one-third', 'span-one-third']);
+			this.subtitle = g.title;
+			var analyzed = g.filter(function(a) {
+			   return a.has('analyzed');
+			});
+			this.row(['span-one-third', 'span-two-thirds']);
 			this.link("Article group", g.title, "http://{0}.wikipedia.org/wiki/{1}".format('en', g.title));
-			if(results.length == 0) {
-				this.display("Article group empty", "No articles were found that qualify for analysis.");
+			if(analyzed.length == 0) {
+				this.display("No article", "No articles were found that qualified for analysis.");
 			} else {
-				var list, func, title;
-				var grouped = _.groupBy(results, function(a) {
-					return a.get('analyzed') ? 'relevant' : 'skipped';
+				var relevant = _.filter(analyzed, function(a) {
+					return a.get('analyzed');
 				});
+				var titles = _.map(relevant , function(a){return a.get('title')});
+				this.textarea('Articles that are events ({0} of {1})'.format(_.size(relevant), _.size(analyzed)), titles.join('\n'), 7);
 				this.column(2);
-				list = _.map(grouped.relevant || [], function(a){return a.get('title')});
-				this.textarea('Articles relevant ({0})'.format(_.size(list)), list.join('\n'));
-				this.column(3);
-				list = _.map(grouped.skipped || [], function(a){return a.get('title')});
-				this.textarea('Articles skipped ({0})'.format(_.size(list)), list.join('\n'));
+				var chart = this.subview(GoogleChartView);
+				var cols = [
+					{label: 'Hypothesis', type: 'string'},
+					{label: 'Qualified', type: 'number'},
+					{label: 'Dismissed', type: 'number'}
+				];
+				var total = _.size(analyzed);
+				var count = _.size(relevant);
+				var rows = [];
+				var func;
+				_.each(_.range(11), function(i) {
+					func = "h{0}".format(i + 1);
+					count = _.size(_.filter(relevant, function(a) { 
+						return a.get(func); 
+					}));
+					rows.push([func, count, total - count]);
+				});
+				chart.renderTable('ColumnChart', cols, rows, {isStacked: true, title: "Hypothesis qualification"});
 			}
 		}
 	});
