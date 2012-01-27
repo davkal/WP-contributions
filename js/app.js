@@ -309,6 +309,7 @@ define(["jquery",
 				start = Date.parse($start.first().text());
 				if(start) {
 					if($start.length == 2) {
+						console.assert(false, "Broken template", Article.get("title"));
 						end = Date.parse($start.last().text());
 					}
 					var $end = $('.dtend', $infobox);
@@ -1434,6 +1435,7 @@ define(["jquery",
 				this.id = this.id || this.title && this.title.toLowerCase();
 				this.el = $('#' + this.id);
 			}
+			this.$nav = $('.topbar ul.nav');
 		},
 		div: function(id, classes) {
 			var el = this.make('div', {'id': id, 'class': classes || ''});
@@ -1490,7 +1492,11 @@ define(["jquery",
 				$(this.el).html(html);
 			}
 			this.column(1);
-			App.link(this);
+			$('a[href="#{0}"]'.format(this.id), this.$nav)
+				.text(this.title)
+				.parent()
+				.removeClass('hidden');
+			//$('body').scrollSpy('refresh');
 			return this;
 		}
 	});
@@ -2123,14 +2129,15 @@ define(["jquery",
 			});
 			this.row(['span-one-third', 'span-two-thirds']);
 			this.link("Article group", g.title, "http://{0}.wikipedia.org/wiki/{1}".format('en', g.title));
-			if(analyzed.length == 0) {
-				this.display("No article", "No articles were found that qualified for analysis.");
-			} else {
+			var total = _.size(analyzed);
+			this.display("Progress", "{0} of {1} articles analyzed ({2}%)".format(total, g.size(), (total * 100 / g.size()).toFixed(1)));
+			if(total > 0) {
 				var relevant = _.filter(analyzed, function(a) {
 					return a.get('analyzed');
 				});
+				var count = _.size(relevant);
 				var titles = _.map(relevant , function(a){return a.get('title')});
-				this.textarea('Articles that are events ({0} of {1})'.format(_.size(relevant), _.size(analyzed)), titles.join('\n'), 7);
+				this.textarea('Articles that are events ({0}, {1}%)'.format(count, (count * 100 / g.size()).toFixed(1)), titles.join('\n'), 4);
 				this.column(2);
 				var chart = this.subview(GoogleChartView);
 				var cols = [
@@ -2138,16 +2145,13 @@ define(["jquery",
 					{label: 'Qualified', type: 'number'},
 					{label: 'Dismissed', type: 'number'}
 				];
-				var total = _.size(analyzed);
-				var count = _.size(relevant);
-				var rows = [];
-				var func;
+				var rows = [], func;
 				_.each(_.range(11), function(i) {
 					func = "h{0}".format(i + 1);
 					count = _.size(_.filter(relevant, function(a) { 
 						return a.get(func); 
 					}));
-					rows.push([func, count, total - count]);
+					rows.push([func.toUpperCase(), count, total - count]);
 				});
 				chart.renderTable('ColumnChart', cols, rows, {isStacked: true, title: "Hypothesis qualification"});
 			}
@@ -2376,7 +2380,16 @@ define(["jquery",
 			return this;
 		}
 	});
+
+// TODOS
 	
+// TODO H0 min 100 revs, 100 authors, 25% of authors located
+// TODO H1 date parsing resolution (day, month, year), qualification for H1(), 7 days, 30 days
+// TODO H2 qualify day and month resolution
+// TODO H3 only articles that have other langs
+// TODO H4 creator country = article country 
+// TODO H5 resolution day/month
+// TODO H6 by country, + limit in distance ?
 // TODO local means same country
 // TODO SD by text ratio
 // TODO stats on PCMU
@@ -2384,7 +2397,6 @@ define(["jquery",
 // TODO improve group results overview, for each H say how many qualified
 // TODO make Locations global for re-use (user pages)
 // TODO group analysis adds to cache results
-// TODO try File API
 
 // NICE TO HAVE
 // town in userpages?
@@ -2394,8 +2406,8 @@ define(["jquery",
 		el: $("body"),
 		details: true,
 		events: {
-			"click #renderGroup": "renderGroupResults",
-			"click #continueBtn": "continueBtn",
+			"click #results": "renderGroupResults",
+			"click #continue": "continueBtn",
 			"click #cache": "clearCache",
 			"click #download": "download",
 			"click #stop": "stop",
@@ -2409,12 +2421,12 @@ define(["jquery",
 		initialize: function() {
 			this.input = this.$("#input");
 			this.$analyze = this.$("#analyze");
+			this.$continue = this.$("#continue");
 			this.$download = this.$("#download");
+			this.$results = this.$("#results");
 			this.$skim = this.$("#skim");
 			this.$clear = this.$("#clear");
 			this.$stop = this.$("#stop");
-			this.$render = this.$("#renderGroup");
-			this.$continue = this.$("#continueBtn");
 			this.$special = this.$("#special");
 			this.$examples = this.$(".example");
 			this.statusEl = $('#status');
@@ -2430,6 +2442,7 @@ define(["jquery",
 		},
 		download: function() {
 			window.open('data:text/json;charset=utf-8,' + JSON.stringify(Group));
+			return false;
 		},
 		checkCacheForGroup: function() {
 			var group = this.getItem(GROUP_KEY);
@@ -2442,25 +2455,24 @@ define(["jquery",
 				for(var i = 0; i < localStorage.length; i++) {
 					key = localStorage.key(i);
 					if(article = Group.get(key)) {
-						article.set(this.getItem(key));
+						result = this.getItem(key);
+						article.set(result);
 					}
 				}
 				this.attachGroupEvents();
+				// show current results
+				var gr = new GroupResultsView;
+				gr.render();
+				// buttons
+				this.$analyze.hide();
+				if(Group.length == Group.has('analyzed').length) {
+					this.$clear.show();
+				} else {
+					this.$continue.show();
+				}
+				this.$results.show();
+				this.input.val(group.title);
 			}
-			this.groupStatus();
-		},
-		groupStatus: function() {
-			var total = done = relevant = 0;
-			if(window.Group && window.Group.length) {
-				total = Group.length;
-				done = _.size(Group.has('analyzed'));
-				relevant = _.size(_.compact(Group.pluck('analyzed')));
-				this.$continue.attr('title', "Continue group analysis: {0}".format(Group.title));
-			}
-			this.$continue.text("Continue {0}/{1}".format(done, total));
-			this.$render.text("{0} results".format(relevant));
-			this.$render.toggleClass('hidden', !done);
-			this.$continue.toggleClass('hidden', !done);
 		},
 		attachGroupEvents: function() {
 			Group.bind('loaded', this.analyzeNext, this);
@@ -2502,6 +2514,8 @@ define(["jquery",
 			});
 		},
 		continueBtn: function() {
+			this.$results.hide();
+			this.$continue.hide();
 			this.$analyze.hide();
 			this.$examples.hide();
 			this.$stop.show();
@@ -2518,6 +2532,7 @@ define(["jquery",
 				}
 			}
 			this.analyzeNext(_.invoke(todo, 'get', 'id'));
+			return false;
 		},
 		renderArticleResults: function() {
 			// TODO implement
@@ -2534,6 +2549,7 @@ define(["jquery",
 			this.$analyze.hide();
 			this.$clear.show();
 			this.$download.show();
+			return false;
 		},
 		analyzeNext: function(todo) {
 			if(!todo || !_.isArray(todo)) {
@@ -2573,20 +2589,24 @@ define(["jquery",
 				console.log("Group analysis complete.");
 				Group.trigger('complete');
 			}
-			this.groupStatus();
 		},
 		analyzeGroup: function(input) {
 			window.Group = new PageList;
-			this.groupStatus();
 			this.attachGroupEvents();
 			// kicking things off
 			Group.fetchPages(input);
 		},
 		analyzeArticle: function(input) {
+			this.input.addClass("disabled");
 			this.reset();
 
 			window.Article = new MainArticle({group: this.group});
 			var authors = Article.get('authors');
+
+			if(App.group && !App.skim) {
+				var gr = new GroupResultsView;
+				gr.render();
+			}
 
 			var av = new Overview;
 			var pv = new PropertiesView;
@@ -2687,13 +2707,6 @@ define(["jquery",
 				me.input.autocomplete('close');
 			});
 		},
-		link: function(sec) {
-			$('a[href="#{0}"]'.format(sec.id), this.nav)
-				.text(sec.title)
-				.parent()
-				.removeClass('hidden');
-			$('body').scrollSpy('refresh');
-		},
 		error: function(text) {
 			$('#input')
 				.parents('.clearfix')
@@ -2701,16 +2714,22 @@ define(["jquery",
 			App.status(text);
 		}, 
 		clear: function() {
-			this.reset();
-			this.$clear.hide();
-			this.$analyze.show();
-			this.$examples.show();
-			this.$download.hide();
+			if(App.group) {
+				this.clearCache();
+				return false;
+			} else {
+				return true;
+			}
 		},
 		stop: function() {
 			this.wipeout();
 			this.$stop.hide();
 			this.$clear.show();
+			if(App.group) {
+				this.$results.show();
+				this.$download.show();
+			}
+			return false;
 		},
 		wipeout: function() {
 			if(window.Group) {
@@ -2729,6 +2748,7 @@ define(["jquery",
 		skim: function() {
 			this.$skim.hide();
 			this.analyze(this.input.val(), true);
+			return false;
 		},
 		analyze: function(input, skim) {
 			App.skim = !!skim;

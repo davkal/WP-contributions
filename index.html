@@ -97,8 +97,6 @@
           </ul>
           <p class="pull-right">
             <button class="btn small" id="cache" title="Delete local results cache. WARNING: This will stop all ongoing analysis.">Cache</button>
-            <button class="btn small hidden" id="renderGroup" title="Show group results from cache.">Cached results</button>
-            <button class="btn small hidden" id="continueBtn" title="Continue group analysis.">Continue</button>
           </p>
         </div>
       </div>
@@ -115,10 +113,12 @@
 						<input id="input" placeholder="Article, Category or Template" class="" size="30" type="text" disabled/>
 
 						<button class="btn disabled primary" id="analyze">Analyze!</button>
+						<button class="btn disabled primary hidden" id="continue">Continue</button>
 						<button class="btn disabled primary hidden" id="skim">Skim</button>
 						<button class="btn disabled danger hidden" id="stop">Stop</button>
 						<button class="btn disabled danger hidden" id="clear">Clear</button>
-						<button class="btn disabled primary hidden" id="download">Download</button>
+						<button class="btn disabled info hidden" id="results">Results</button>
+						<button class="btn disabled info hidden" id="download">Download</button>
 
 						<button class="btn disabled example" title="2011 Egyptian revolution">A</button>
 						<button class="btn disabled example" title="2011 Bahraini uprising">B</button>
