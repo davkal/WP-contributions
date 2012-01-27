@@ -596,6 +596,13 @@ define(["jquery",
 			function checkCategories(a, list) {
 				return !a.has("categories") || !_.size(_.intersect(a.get('categories'), list));
 			}
+			function checkLocatedAuthors(a) {
+				var authors = a.get('authors');
+				if(authors.length == 0 || authors.has('location').length / authors.length >= 0.25) {
+					return true;
+				}
+				return _.include(this.todos, 'authors'); // not enough yet, still locating
+			}
 			return {
 				"having a location" : this.has('location'),
 				"having a date" : this.has('start'),
@@ -603,7 +610,10 @@ define(["jquery",
 				"date not older than 2002" : this.has('start') && this.get('start').getFullYear() > 2001,
 				// potential for a lot of fine tuning
 				"blacklisted category" : checkCategories(this, ['Living people']),
-				"blacklisted template" : checkTemplates(this, ['governor', 'officeholder'])
+				"blacklisted template" : checkTemplates(this, ['governor', 'officeholder']),
+				"at least 100 revisions" : !this.get('revisions').length || _.size(this.get('revisions')) >= 100,
+				"at least 100 authors" : !this.get('authors').length || _.size(this.get('authors')) >= 100,
+				"at least 25% authors located": checkLocatedAuthors(this)
 			};
 		},
 		relevant: function() {
@@ -2383,7 +2393,6 @@ define(["jquery",
 
 // TODOS
 	
-// TODO H0 min 100 revs, 100 authors, 25% of authors located
 // TODO H1 date parsing resolution (day, month, year), qualification for H1(), 7 days, 30 days
 // TODO H2 qualify day and month resolution
 // TODO H3 only articles that have other langs
