@@ -325,14 +325,16 @@ define(["jquery",
 						end.setDate(start.getDate() + 1);
 					}
 					if(!isNaN(start.getTime()) && !isNaN(end.getTime())) {
-						dates = [start, end];
+						// last item is resolution: 0 -> year, 1 -> month, 2 -> day
+						dates = [start, end, 2];
 					}
 				}
 			}
 			// check parsed templates of dates have not been found yet
 			if(!dates && this.has('templates')) {
 				if(infobox = this.get('templates').findByType('infobox')) {
-					if(!infobox.match(/demonym/i)) { // ignore country boxes, fixes articles like Berlin
+					// HACK to ignore country boxes, fixes articles like Berlin
+					if(!infobox.match(/demonym/i)) { 
 						if(dateField = infobox.date()) {
 							dates = DateParser.parse(dateField);
 							if(!dates) {
@@ -349,8 +351,11 @@ define(["jquery",
 				dates = DateParser.parse(this.get('paragraph').replace(RE_PARENTHESES, ""));
 			}
 			if(dates) {
-				this.set({start: dates[0]});
-				this.set({end: dates[1]});
+				this.set({
+					start: dates[0],
+					end: dates[1],
+					date_resolution: dates[2]
+				});
 				if(new Date() - this.get('end') < 10*1000) {
 					this.set({ongoing: true});
 				}
@@ -655,11 +660,13 @@ define(["jquery",
 			var revisions = this.get('revisions');
 			var languages = this.get('languages');
 
-			var grouped, location, author, revision, username, list;
+			var grouped, location, author, revision, username, list, limit;
 			revision = revisions.at(0);
 			res.created = new Date(revision.get('timestamp'));
 			res.start = this.get('start');
 			res.end = this.get('end');
+			res.date_resolution = this.get('date_resolution');
+
 			// make start,end an open interval
 			res.end.setDate(res.end.getDate() + 1);
 			var gr = revisions.groupBy(function(r) {
@@ -675,16 +682,18 @@ define(["jquery",
 
 			// H1,H2 timedelta created - started
 			res.delta = (res.created - res.start) / MS_PER_DAY; // in days
-			res.h1 = res.h2 = true;
+			res.h1 = res.h2 = res.date_resolution 
+				&& res.date_resolution > 1 ? res.delta <= 7 : res.delta <= 30;
 
 			// H3 first language
 			res.first_lang = languages.first().get('lang');
-			res.h3 = true;
+			res.h3 = languages.length > 1;
 
 			// H4 distance of creator
 			author = authors.get(revision.get('user'));
-			if(author && author.has('location')) {
-				res.creator_dist = author.get('location').get('distance');
+			if(location = author.get('location')) {
+				res.creator_dist = location.get('distance');
+				res.creator_citizen = location.get('region') == this.get('location').get('region');
 				res.h4 = true;
 			} else {
 				res.h4 = false;
@@ -712,30 +721,34 @@ define(["jquery",
 			res.located_text_ratio = res.located_text / revision.get('length');
 
 			// H5 date range "beginning" 3 days
-			res.beginning = new Date(res.start);
-			res.beginning.setDate(res.beginning.getDate() + 3);
-			// beginning is part of during
-			var earlies;
-			if(gr.during || gr.after) {
-				earlies = _.filter(_.compact(_.union(gr.during, gr.after)), function(r) {
-					return new Date(r.get('timestamp')) < res.beginning;
-				});
-			}
+			res.h5 = res.date_resolution > 0;
+			if(res.h5) {
+				res.beginning = new Date(res.start);
+				var offset = res.date_resolution > 1 ? 7 : 30;
+				res.beginning.setDate(res.beginning.getDate() + offset);
+				// beginning is part of during
+				var earlies;
+				if(gr.during || gr.after) {
+					earlies = _.filter(_.compact(_.union(gr.during, gr.after)), function(r) {
+						return new Date(r.get('timestamp')) < res.beginning;
+					});
+				}
 
-			// H5 anon/regs count beginning
-			if(_.size(earlies)) {
-				grouped = _.groupBy(earlies, function(r) {
-					username = r.get('user');
-					if(author = authors.get(username)) {
-						return author.get('ip') ? 'anon' : 'reg';
-					}
-					return 'bot';
-				});
-				res.early_anon_count = _.size(grouped.anon);
-				res.early_registered_count = _.size(grouped.reg);
-				res.early_author_count = res.early_anon_count + res.early_registered_count;
+				// H5 anon/regs count beginning
+				if(_.size(earlies)) {
+					grouped = _.groupBy(earlies, function(r) {
+						username = r.get('user');
+						if(author = authors.get(username)) {
+							return author.get('ip') ? 'anon' : 'reg';
+						}
+						return 'bot';
+					});
+					res.early_anon_count = _.size(grouped.anon);
+					res.early_registered_count = _.size(grouped.reg);
+					res.early_author_count = res.early_anon_count + res.early_registered_count;
+				}
+				res.h5 = res.early_author_count >= 10;
 			}
-			res.h5 = res.early_author_count >= 10;
 
 			// H6 local/distant count (dist < mean) during event
 			if(gr.during) {
@@ -2167,15 +2180,22 @@ define(["jquery",
 					var cols = [
 						{label: 'Hypothesis', type: 'string'},
 						{label: 'Qualified', type: 'number'},
-						{label: 'Dismissed', type: 'number'}
+						{label: 'Not qualified', type: 'number'},
+						{label: 'Not an event article', type: 'number'}
 					];
-					var rows = [], func;
+					var rows = [], func, not_qualified, qualified;
 					_.each(_.range(11), function(i) {
 						func = "h{0}".format(i + 1);
-						count = _.size(_.filter(relevant, function(a) { 
-							return a.get(func); 
-						}));
-						rows.push([func.toUpperCase(), count, total - count]);
+						not_qualified = 0;
+						qualified = 0;
+						_.each(relevant, function(a) { 
+							if(a.get(func)) {
+								qualified++;
+							} else {
+								not_qualified++;
+							}
+						});
+						rows.push([func.toUpperCase(), qualified, not_qualified, total - qualified - not_qualified]);
 					});
 					var config = {
 						isStacked: true, 
@@ -2192,7 +2212,7 @@ define(["jquery",
 
 	window.GroupHypothesesView = SectionView.extend({
 		title: "Hypotheses",
-		h1: function(results, title, subtitle) {
+		h1: function(results, title, subtitle, total) {
 			var deltas = _.invoke(results, 'get', 'delta');
 			var avg = _.sum(deltas) / deltas.length;
 			var text = "{0} ({1} days on average)".format(avg < 3 ? 'True' : 'False', avg.toFixed(1));
@@ -2214,7 +2234,7 @@ define(["jquery",
 			];
 			chart.renderTable('ColumnChart', cols, rows);
 		},
-		h2: function(results, title, subtitle) {
+		h2: function(results, title, subtitle, total) {
 			var rows = _.map(results, function(r) {
 				return [r.get('created'), r.get('delta')];
 			});
@@ -2231,7 +2251,7 @@ define(["jquery",
 			];
 			chart.renderTable('ScatterChart', cols, rows);
 		},
-		h3: function(results, title, subtitle) {
+		h3: function(results, title, subtitle, total) {
 			var langs = _.invoke(results, 'get', 'first_lang');
 			var english = _.filter(langs, function(l) {return l == 'en'});
 			var ratio = english.length / langs.length;
@@ -2250,17 +2270,19 @@ define(["jquery",
 			];
 			chart.renderTable('ColumnChart', cols, rows);
 		},
-		h4: function(results, title, subtitle) {
-			var locals = _.filter(results, function(l) {return l.get('creator_dist') <= l.get('mean_dist')});
-			var ratio = locals.length / results.length;
+		h4: function(results, title, subtitle, total) {
+			var residents = _.filter(results, function(r) {
+				return r.get('creator_resident');
+			});
+			var ratio = residents.length / results.length;
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 			var text =  "{0} ({1}% of articles with located creator)".format(ratio > 0.5 ? 'True' : 'False', Math.round(ratio * 100));
-			this.display("Articles were created in the events' proximity", text);
+			this.display("Articles were created by a resident", text);
 			this.column(2);
 			var rows = [
-				['Local', locals.length],
-				['Distant', results.length - locals.length],
-				['Unknown', Group.length - results.length]
+				['Same country', residents.length],
+				['Differen country', results.length - residents.length],
+				['Unknown', total - results.length]
 			];
 			var chart = this.subview(GoogleChartView);
 			var cols = [
@@ -2269,13 +2291,13 @@ define(["jquery",
 			];
 			chart.renderTable('PieChart', cols, rows);
 		},
-		h5: function(results, title, subtitle) {
+		h5: function(results, title, subtitle, total) {
 			var values = _.map(results, function(e) {
 				return e.get('early_anon_count') / e.get('early_author_count');
 			});
 
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
-			this.display("Anonymous contributions in the beginning", "{0} articles have contributions in the first 3 days.".format(results.length));
+			this.display("Anonymous contributions in the beginning", "{0} articles have contributions in the first 7/30 days.".format(results.length));
 			if(values.length) {
 				this.column(2);
 				var chart = this.subview(BoxChartView);
@@ -2393,6 +2415,9 @@ define(["jquery",
 					"After an event has ended, the spatial distribution of the surviving contributions will become less local."
 				];
 				var list, func, title;
+				var total = _.size(g.filter(function(a) {
+					return a.get('analyzed');
+				}));
 				_.each(hs, function(subtitle, i) {
 					func = "h{0}".format(i + 1);
 					// pre-filtering for relevant results for each H
@@ -2401,7 +2426,7 @@ define(["jquery",
 					});
 					title = func.toUpperCase();
 					if(list.length > 1) {
-						this[func] && this[func](list, title, subtitle);
+						this[func] && this[func](list, title, subtitle, total);
 					} else {
 						this.row(['span-two-thirds', 'span-one-third'], title, subtitle);
 						this.display("Not enough articles", "{0} valid results in {1} analyzed articles.".format(list.length, _.size(results)));
@@ -2414,18 +2439,10 @@ define(["jquery",
 
 // TODOS
 	
-// TODO avg located users
-// TODO H1 date parsing resolution (day, month, year), qualification for H1(), 7 days, 30 days
-// TODO H2 qualify day and month resolution
-// TODO H3 only articles that have other langs
-// TODO H4 creator country = article country 
-// TODO H5 resolution day/month
-// TODO H6 by country, + limit in distance ?
-// TODO local means same country
+// TODO H6 by country, + limit in distance ? lower quartile
 // TODO SD by text ratio
 // TODO stats on PCMU
 // TODO stats on userpages
-// TODO improve group results overview, for each H say how many qualified
 // TODO make Locations global for re-use (user pages)
 // TODO group analysis adds to cache results
 
@@ -2437,7 +2454,7 @@ define(["jquery",
 		el: $("body"),
 		details: true,
 		events: {
-			"click #results": "renderGroupResults",
+			"click #results": "renderGroup",
 			"click #continue": "continueBtn",
 			"click #cache": "clearCache",
 			"click #download": "download",
@@ -2507,7 +2524,7 @@ define(["jquery",
 		},
 		attachGroupEvents: function() {
 			Group.bind('loaded', this.analyzeNext, this);
-			Group.bind('complete', this.renderGroupResults, this);
+			Group.bind('complete', this.renderGroup, this);
 			Group.bind('change:summary', function(r) {
 				console.log("Done:", r.get('summary'));
 			});
@@ -2565,10 +2582,10 @@ define(["jquery",
 			this.analyzeNext(_.invoke(todo, 'get', 'id'));
 			return false;
 		},
-		renderArticleResults: function() {
+		renderArticle: function() {
 			// TODO implement
 		},
-		renderGroupResults: function() {
+		renderGroup: function() {
 			this.reset();
 			var gr = new GroupResultsView;
 			gr.render();
