@@ -631,7 +631,7 @@ define(["jquery",
 				analyzed: false // false means irrelevant
 			};
 
-			if(!this.relevant()) {
+			if(App.group && !this.relevant()) {
 				console.log("Article does not qualify:", title);
 				App.setItem(id, res, true);
 				// silent set, dont render useless results
@@ -640,11 +640,6 @@ define(["jquery",
 				return res;
 			}
 
-			var authors = this.get('authors');
-			var revisions = this.get('revisions');
-			var languages = this.get('languages');
-
-			var grouped, location, author, revision, username, list;
 			res.input = id;
 			res.analyzed = true;
 			res.summary = this.toString();
@@ -656,6 +651,11 @@ define(["jquery",
 				return res;
 			}
 
+			var authors = this.get('authors');
+			var revisions = this.get('revisions');
+			var languages = this.get('languages');
+
+			var grouped, location, author, revision, username, list;
 			revision = revisions.at(0);
 			res.created = new Date(revision.get('timestamp'));
 			res.start = this.get('start');
@@ -696,9 +696,20 @@ define(["jquery",
 			if(locations.length) {
 				var dists = _.map(locations, function(l) { return l.get('distance')});
 				res.mean_dist = _.sum(dists) / dists.length;
+				res.located = locations.length;
+				res.located_ratio = locations.length / authors.length;
 			} else {
 				console.log("No author locations.", title);
 			}
+
+			// general stats on located text survival
+			revision = this.get('current');
+			var counter = revision.get('counter');
+			var located = _.intersect(revisions.located(), revision.get('revisions'));
+			res.located_text = _.sum(_.map(located, function(r) {
+				return counter[r.id];
+			}));
+			res.located_text_ratio = res.located_text / revision.get('length');
 
 			// H5 date range "beginning" 3 days
 			res.beginning = new Date(res.start);
@@ -2146,24 +2157,34 @@ define(["jquery",
 					return a.get('analyzed');
 				});
 				var count = _.size(relevant);
-				var titles = _.map(relevant , function(a){return a.get('title')});
-				this.textarea('Articles that are events ({0}, {1}%)'.format(count, (count * 100 / g.size()).toFixed(1)), titles.join('\n'), 4);
-				this.column(2);
-				var chart = this.subview(GoogleChartView);
-				var cols = [
-					{label: 'Hypothesis', type: 'string'},
-					{label: 'Qualified', type: 'number'},
-					{label: 'Dismissed', type: 'number'}
-				];
-				var rows = [], func;
-				_.each(_.range(11), function(i) {
-					func = "h{0}".format(i + 1);
-					count = _.size(_.filter(relevant, function(a) { 
-						return a.get(func); 
-					}));
-					rows.push([func.toUpperCase(), count, total - count]);
-				});
-				chart.renderTable('ColumnChart', cols, rows, {isStacked: true, title: "Hypothesis qualification"});
+				if(count) {
+					var located = _.avg(_.map(relevant , function(a){return a.get('located_ratio')})) * 100;
+					var located_text = _.avg(_.map(relevant , function(a){return a.get('located_text_ratio')})) * 100;
+					this.display("Georeferenced on average", "Authors: {0}%; text in latest revision: {1}%".format(located.toFixed(1), located_text.toFixed(1)));
+
+					this.column(2);
+					var chart = this.subview(GoogleChartView);
+					var cols = [
+						{label: 'Hypothesis', type: 'string'},
+						{label: 'Qualified', type: 'number'},
+						{label: 'Dismissed', type: 'number'}
+					];
+					var rows = [], func;
+					_.each(_.range(11), function(i) {
+						func = "h{0}".format(i + 1);
+						count = _.size(_.filter(relevant, function(a) { 
+							return a.get(func); 
+						}));
+						rows.push([func.toUpperCase(), count, total - count]);
+					});
+					var config = {
+						isStacked: true, 
+						title: 'Articles qualified: {0} ({1}% of all)'.format(count, (count * 100 / g.size()).toFixed(1))
+					};
+					chart.renderTable('ColumnChart', cols, rows, config);
+				} else {
+					this.display("Article analysis", "No article qualified yet.");
+				}
 			}
 		}
 	});
@@ -2393,6 +2414,7 @@ define(["jquery",
 
 // TODOS
 	
+// TODO avg located users
 // TODO H1 date parsing resolution (day, month, year), qualification for H1(), 7 days, 30 days
 // TODO H2 qualify day and month resolution
 // TODO H3 only articles that have other langs
