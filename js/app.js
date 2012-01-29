@@ -24,6 +24,7 @@ define(["jquery",
 	window.RE_WIKI_LINK = /\[\[[^\]]*\]\]/g;
 	window.MS_PER_DAY = 1000 * 60 * 60 * 24;
 	window.CREATED_TOLERANCE = 3 * MS_PER_DAY;
+	window.LOCAL_HARD_LIMIT = 500; // (km) distance limit to be declared local
 	window.PROXY_URL = "http://154596.webhosting56.1blu.de/proxy.php";
 
 	window.c = function() {
@@ -167,7 +168,6 @@ define(["jquery",
 
 	window.Location = Model.extend({
 		url: function() {
-			// use this global one until I get my own webhosting
 			return 'http://154596.webhosting56.1blu.de/quova/quova.php?ip=' + this.get('ip');
 		},
 		parse: function(res) {
@@ -215,7 +215,7 @@ define(["jquery",
 				target.set({location: country.clone()});
 				target.trigger(signal);
 			} else {
-				console.log("Trying loc candidate", title);
+				// console.log("Trying loc candidate", title);
 				var article = new Page({title: title, lang: Article.get('lang')});
 				article.bind('done', function() {
 					var loc = article.get('location');
@@ -308,8 +308,7 @@ define(["jquery",
 			if($start.length) {
 				start = Date.parse($start.first().text());
 				if(start) {
-					if($start.length == 2) {
-						console.assert(false, "Broken template", Article.get("title"));
+					if($start.length > 1) {
 						end = Date.parse($start.last().text());
 					}
 					var $end = $('.dtend', $infobox);
@@ -461,12 +460,17 @@ define(["jquery",
 						attr.location = new Location(location);
 					}
 				}
-				var locationCandidates;
+				var locationCandidates, country;
 
 				if(me.isMain()) {
-					if(!attr.location) { 
-						// in case no coordinates were found
-						locationCandidates = me.parseLocation($text, $infobox);
+					// still have to find out the country
+					locationCandidates = me.parseLocation($text, $infobox);
+					if(attr.location) {
+						// just need to add the country
+						if(country = Countries.findCountry(locationCandidates)) {
+							attr.location.set({region: country});
+							locationCandidates = null;
+						}
 					}
 
 					me.parseDates($infobox);
@@ -482,7 +486,6 @@ define(["jquery",
 					});
 					me.get('languages').reset(languages);
 				}
-				App.status();
 				me.set(attr);
 				// short circuit if this is used as helper page
 				var signal = me.isMain() ? 'additional' : 'done';
@@ -594,6 +597,19 @@ define(["jquery",
 				this.trigger('done');
 			}
 		},
+		citizen: function(loc) {
+			var here = this.get('location').get('region');
+			if(here) {
+				return here == loc.get('region');
+			}
+		},
+		local: function(author, limit) {
+			if(author.has('userpage')) {
+				return this.citizen(author.get('location'));
+			} else {
+				return author.get('location').get('distance') <= Math.min(limit, LOCAL_HARD_LIMIT);
+			}
+		},
 		requirements: function() {
 			function checkTemplates(a, list) {
 				return !a.has("templates") || !a.get('templates').hasTemplates(list);
@@ -625,6 +641,7 @@ define(["jquery",
 			return _.all(this.requirements(), function(v, r) { return v; });
 		},
 		results: function() {
+			var article = this;
 			if(this.has('results')) {
 				return this.get('results');
 			}
@@ -660,7 +677,7 @@ define(["jquery",
 			var revisions = this.get('revisions');
 			var languages = this.get('languages');
 
-			var grouped, location, author, revision, username, list, limit;
+			var grouped, location, author, revision, username, list, count, limit;
 			revision = revisions.at(0);
 			res.created = new Date(revision.get('timestamp'));
 			res.start = this.get('start');
@@ -680,6 +697,29 @@ define(["jquery",
 				return 'after';
 			});
 
+			// Stats for locations
+			var locations = _.compact(authors.pluck('location'));
+			if(locations.length) {
+				var dists = _.map(locations, function(l) { return l.get('distance')});
+				res.dist_mean = _.sum(dists) / dists.length;
+				dists.sort(d3.ascending);
+				res.dist_q1 = d3.quantile(dists, .25);
+				res.dist_q3 = d3.quantile(dists, .75);
+
+				res.located = locations.length;
+				res.located_ratio = locations.length / authors.length;
+
+				count = _.size(authors.has('pmcu'));
+				res.located_pmcu = count;
+				res.located_pmcu_ratio = count / authors.length;
+
+				count = _.size(authors.has('userpage'));
+				res.located_user_pages = count;
+				res.located_user_pages_ratio = count / authors.length;
+			} else {
+				console.log("No author locations.", title);
+			}
+
 			// H1,H2 timedelta created - started
 			res.delta = (res.created - res.start) / MS_PER_DAY; // in days
 			res.h1 = res.h2 = res.date_resolution 
@@ -693,22 +733,12 @@ define(["jquery",
 			author = authors.get(revision.get('user'));
 			if(location = author.get('location')) {
 				res.creator_dist = location.get('distance');
-				res.creator_citizen = location.get('region') == this.get('location').get('region');
+				res.creator_citizen = this.citizen(location.get('region'));
+				res.creator_local = this.local(author, res.dist_q1);
 				res.h4 = true;
 			} else {
 				res.h4 = false;
 				console.log("No creator location.", title, revision.get('user'));
-			}
-
-			// H4,H5,H6,H10 mean distance of authors
-			var locations = _.compact(authors.pluck('location'));
-			if(locations.length) {
-				var dists = _.map(locations, function(l) { return l.get('distance')});
-				res.mean_dist = _.sum(dists) / dists.length;
-				res.located = locations.length;
-				res.located_ratio = locations.length / authors.length;
-			} else {
-				console.log("No author locations.", title);
 			}
 
 			// general stats on located text survival
@@ -750,13 +780,17 @@ define(["jquery",
 				res.h5 = res.early_author_count >= 10;
 			}
 
-			// H6 local/distant count (dist < mean) during event
+			// H6 local/distant count (dist < q1) during event
 			if(gr.during) {
 				grouped = _.groupBy(gr.during, function(r) {
 					username = r.get('user');
 					if(author = authors.get(username)) {
 						if(location = author.get('location')) {
-							return location.get('distance') < res.mean_dist ? 'local' : 'distant';
+							var local = article.local(author, res.dist_q1);
+							if(_.isUndefined(local)) {
+								return 'nolocation';
+							}
+							return local ? 'local' : 'distant';
 						}
 					}
 					return 'nolocation';
@@ -816,7 +850,11 @@ define(["jquery",
 						grouped = _.groupBy(r.get('authors'), function(username) {
 							if(author = authors.get(username)) {
 								if(location = author.get('location')) {
-									return location.get('distance') < res.mean_dist ? 'local' : 'distant';
+									var local = article.local(author, res.dist_q1);
+									if(_.isUndefined(local)) {
+										return 'nolocation';
+									}
+									return local ? 'local' : 'distant';
 								}
 							}
 							return 'nolocation';
@@ -898,12 +936,9 @@ define(["jquery",
 						}
 					});
 
-					attr.countries = countries;
 					if(country) {
-						attr.country = country;
-						attr.context = context;
 						//console.log(this.get('title'), pattern, country);
-						this.trigger('country', this.get('author'), country);
+						attr.country = country;
 					}
 				}
 			}
@@ -1075,6 +1110,7 @@ define(["jquery",
 				next.set({located: false});
 				// try PMCU username -> IP mapping
 				if(PMCU[next.id]) {
+					next.set({pmcu: true});
 					var loc = new Location({id: next.id, ip: PMCU[next.id]});
 					loc.bind('change:located', this.addLocation, this);
 					loc.bind('loaded', this.locateUsers, this);
@@ -1088,7 +1124,10 @@ define(["jquery",
 						this.creator_page = userPage;
 					}
 					userPage.bind('loaded', this.locateUsers, this);
-					userPage.bind('country', this.addCountry, this);
+					userPage.bind('change:country', function(page) {
+						next.set({userpage: true});
+						this.addCountry(next, page.get('country'))
+					}, this);
 					App.status('User page {0}...'.format(next.id));
 					userPage.retrieve();
 				} else {
@@ -1208,6 +1247,9 @@ define(["jquery",
 				'Ireland': 'Republic of Ireland',
 				'Russian Federation': 'Russia'
 			};
+		},
+		findCountry: function(list) {
+			return _.first(_.compact(_.map(list, _.bind(this.isCountry, this))));
 		},
 		isCountry: function(text) {
 			return this.alt[text] && this.get(this.alt[text]) || this.get(text);
@@ -1651,7 +1693,11 @@ define(["jquery",
 			if(!r.h4) {
 				return "n/a (no creator location).";
 			}
-			return "{0} ({1} km)".format(r.creator_dist <= r.mean_dist ? 'True' : 'False', r.creator_dist.toFixed(1));
+			var residence = "country unknown";
+			if(!_.isUndefined(r.creator_citizen)) {
+				residence = r.creator_citizen ? "same country" : "different country";
+			}
+			return "{0} ({1} km, {2})".format(r.creator_local ? 'True' : 'False', r.creator_dist.toFixed(1), residence);
 		},
 		h5: function(r) {
 			if(!r.h5) {
@@ -1710,13 +1756,13 @@ define(["jquery",
 				return this;
 			}
 			// single article hypotheses
-			this.display('H1. Article was created in the first 3 days', this.h1(r));
+			this.display('H1. Article was created after 7/30 days', this.h1(r));
 			// H2 relates to a group of articles
 			this.display('H2. Recent articles are created sooner', "n/a (single article).");
 			this.display('H3. First article was created in English', this.h3(r));
-			this.display('H4. Creator distance was less than mean distance', this.h4(r));
+			this.display('H4. Creator was a local', this.h4(r));
 			this.display('H5. Most of early contributors were anonymous', this.h5(r));
-			this.display('H6. Most of contributions during the event had distance less than mean', this.h6(r));
+			this.display('H6. Most of contributions during the event were local', this.h6(r));
 			this.display('H7. Revisions are getting smaller in length after event', this.h7(r));
 			this.display('H8. Most late contributors were registered users', this.h8(r));
 			this.display('H9. Spatial distribution less local after event', this.h9(r));
@@ -1928,6 +1974,7 @@ define(["jquery",
 				.width(w - m[1] - m[3])
 				.height(h - m[0] - m[2]);
 			
+			// TODO iqr expects sorted data, true?
 			var vis = d3.select("#"+id).selectAll("svg")
 				.data([data])
 				.enter().append("svg")
@@ -2172,8 +2219,14 @@ define(["jquery",
 				var count = _.size(relevant);
 				if(count) {
 					var located = _.avg(_.map(relevant , function(a){return a.get('located_ratio')})) * 100;
+					var located_pmcu = _.avg(_.map(relevant , function(a){return a.get('located_pmcu_ratio')})) * 100;
+					var located_userpages = _.avg(_.map(relevant , function(a){return a.get('located_user_pages_ratio')})) * 100;
+					var baseline = located - located_pmcu - located_userpages;
+					var with_pmcu = located - located_pmcu;
+					this.display("Georeferencing authors", "Baseline (anonymous only): {0}%; w/ PMCU: {1}%; w/ PMCU + userpages: {2}%".format(baseline.toFixed(1), with_pmcu.toFixed(1), located.toFixed(1)));
+
 					var located_text = _.avg(_.map(relevant , function(a){return a.get('located_text_ratio')})) * 100;
-					this.display("Georeferenced on average", "Authors: {0}%; text in latest revision: {1}%".format(located.toFixed(1), located_text.toFixed(1)));
+					this.display("Located text in latest revision", "{0}% (using PMCU and userpages)".format(located_text.toFixed(1)));
 
 					this.column(2);
 					var chart = this.subview(GoogleChartView);
@@ -2439,10 +2492,10 @@ define(["jquery",
 
 // TODOS
 	
-// TODO H6 by country, + limit in distance ? lower quartile
+// TODO H6 by country + limit
+// TODO H3 langs for article
 // TODO SD by text ratio
-// TODO stats on PCMU
-// TODO stats on userpages
+// TODO sub-categories (1 level deep) e.g. Category:Revolutions by country
 // TODO make Locations global for re-use (user pages)
 // TODO group analysis adds to cache results
 
