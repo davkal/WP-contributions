@@ -726,8 +726,15 @@ define(["jquery",
 				&& res.date_resolution > 1 ? res.delta <= 7 : res.delta <= 30;
 
 			// H3 first language
+			languages.sort();
 			res.first_lang = languages.first().get('lang');
-			res.h3 = languages.length > 1;
+			var country = Countries.get(this.get('location').has('region'));
+			// qualified when article has country with official langs other than english
+			res.h3 = languages.length > 1 && country && country.has('languages') 
+				&& !_.include(country.get('languages'), 'en');
+			if(res.h3) {
+				res.country = country.id;
+			}
 
 			// H4 distance of creator
 			author = authors.get(revision.get('user'));
@@ -1209,6 +1216,9 @@ define(["jquery",
 
 	window.LanguageCollection = Collection.extend({
 		model: Page,
+		comparator: function(l) {
+			return l.has('revisions') && l.get('revisions').first().get('timestamp');
+		},
 		fetchNext: function() {
 			var article = this.find(function(a) {
 				return !a.has('revisions');
@@ -2497,10 +2507,8 @@ define(["jquery",
 
 // TODOS
 	
-// TODO H6 by country + limit
-// TODO H3 langs for article
-// TODO SD by text ratio
 // TODO sub-categories (1 level deep) e.g. Category:Revolutions by country
+// TODO SD by text ratio
 // TODO make Locations global for re-use (user pages)
 // TODO group analysis adds to cache results
 
