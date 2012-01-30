@@ -652,7 +652,7 @@ define(["jquery",
 				analyzed: false // false means irrelevant
 			};
 
-			if(App.group && !this.relevant()) {
+			if(!this.has('start') || App.group && !this.relevant()) {
 				console.log("Article does not qualify:", title);
 				App.setItem(id, res, true);
 				// silent set, dont render useless results
@@ -1138,7 +1138,7 @@ define(["jquery",
 					userPage.retrieve();
 				} else {
 					// skipping user pages
-					this.locateUsers();
+					_.defer(_.bind(this.locateUsers, this));
 				}
 			} else {
 				this.trigger('done', this);
@@ -1479,6 +1479,7 @@ define(["jquery",
 			if(rev) {
 				var me = this;
 				var count = this.sampled || this.length;
+				rev.set({authors: false}); // marking as ready for analysis
 				_.debounce(function() {
 					rev.bind('loaded', me.fetchAuthors, me);
 					me.page++;
@@ -2121,6 +2122,7 @@ define(["jquery",
 				}
 
 				var listeners = {
+				/*
 					'rangechange': function(){
 						var range = me.chart.getVisibleChartRange();
 						var revisions = Article.get('revisions');
@@ -2132,6 +2134,7 @@ define(["jquery",
 						});
 						Article.get('revisions').current(latest.id);
 					}
+				*/
 				};
 				var config = {
 					displayExactValues: true,
@@ -2222,6 +2225,8 @@ define(["jquery",
 						rows.push([country, d, dist, count, revCount[country] || 0, text[country] || 0]);
 					});
 				});
+
+				// FIXME show only top 10
 
 				var config = {
 					height: 400,
@@ -2528,12 +2533,14 @@ define(["jquery",
 
 // TODOS
 	
-// TODO sub-categories (1 level deep) e.g. Category:Revolutions by country
+// TODO timeline with dots for articles in group
 // TODO SD by text ratio
+// TODO move up stats for location in results()
 // TODO make Locations global for re-use (user pages)
 // TODO group analysis adds to cache results
 
 // NICE TO HAVE
+// wikiproject local pages
 // town in userpages?
 // you are where you edit
 
