@@ -1247,6 +1247,11 @@ define(["jquery",
 				'Ireland': 'Republic of Ireland',
 				'Russian Federation': 'Russia'
 			};
+
+			// add region property 
+			this.each(function(c) {
+				c.set({region: c.id});
+			});
 		},
 		findCountry: function(list) {
 			return _.first(_.compact(_.map(list, _.bind(this.isCountry, this))));
@@ -2918,28 +2923,41 @@ define(["jquery",
 
 			// Playground
 			/* 
-			var p = new Page({title: "ISO_3166-1"});
-			p.bind('additional', function() {
-				var $l = $(p.attributes.text).find('.flagicon');
-				window.list = [];
-				_.each($l, function(l) {
-					var link = $(l).next();
-					var title = link.attr('title');
-					var cp = new Page({title: decodeURI(link.attr('href').substr(6))});
-					cp.bind('additional', function() {
-						var co;
-						if(co = cp.get('location')) {
-							co = co.toJSON();
-							co.id = title;
-							co.region = title;
-							list.push(co);
-						} else {
-							console.log("No coords", title);
-						}
-					}, cp);
-					cp.fetchAdditionalData();
+			var p = new Page({title: "List_of_ISO_639-1_codes"});
+			p.bind('done', function() {
+				window.list = {};
+				var $l = $(p.attributes.text).siblings('.wikitable');
+				_.each($("tr", $l), function(l) {
+					var code = $(l).children('td:nth-child(5)').text();
+					var link = $('td:nth-child(3) a', l).first().text();
+					if(code.length == 2) { 
+						list[link] = code;
+					}
 				});
-				//console.log(list);
+				window.list2 = {};
+				p = new Page({title: "List_of_official_languages_by_state"});
+				p.bind('done', function() {
+					$l = $(p.attributes.text).find('.flagicon');
+					_.each($l, function(l) {
+						var country = $(l).next().attr('title');
+						list2[country] = [];
+						var langs = $(l).parent().parent().children('ul').first().children('li');
+						_.each(langs, function(lang) {
+							var candidate = $(lang).text();
+							_.each(_.keys(list), function(k) {
+								if(candidate.startsWith(k)) {
+									list2[country].push(list[k]);
+								}
+							});
+						});
+					});
+					window.list3 = _.map(countries.list, function(c) {
+						delete c.region;
+						c.languages = list2[c.id];
+						return c;
+					});
+				});
+				p.fetchAdditionalData();
 			});
 			p.fetchAdditionalData();
 			*/
