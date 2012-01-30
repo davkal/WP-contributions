@@ -112,7 +112,6 @@ define(["jquery",
 		append: true,
 		limit: 500,
 		page: 1,
-		offset: null,
 		initialize: function(models, options) {
 			_.extend(this, options || {});
 		},
@@ -143,7 +142,7 @@ define(["jquery",
 				},
 				success: function(col, res) {
 					App.setItem(key, res);
-					if(!me.offset) {
+					if(_.isUndefined(me.offset)) {
 						me.trigger(me.loaded || 'loaded', me);
 					}
 				}
@@ -740,7 +739,7 @@ define(["jquery",
 			author = authors.get(revision.get('user'));
 			if(location = author.get('location')) {
 				res.creator_dist = location.get('distance');
-				res.creator_citizen = this.citizen(location.get('region'));
+				res.creator_citizen = this.citizen(location);
 				res.creator_local = this.local(author, res.dist_q1);
 				res.h4 = true;
 			} else {
@@ -986,7 +985,7 @@ define(["jquery",
 				views = _.filter(views, function(v) {
 					return new Date(v.id) >= created - MS_PER_DAY;
 				});
-				this.offset = null;
+				delete this.offset;
 				if(Article.has("redirects")) {
 					var redirects = Article.get("redirects");
 					if(redirects.length) {
@@ -1305,7 +1304,7 @@ define(["jquery",
 
 	window.PageList = Collection.extend({
 		model: Page,
-		offset: null,
+		lists: null,
 		fetchPages: function(title) {
 			// template or category?
 			this.title = title;
@@ -1320,33 +1319,56 @@ define(["jquery",
 			this.titlekey = isTemplate ? "eititle" : "cmtitle";
 			this.limitkey = isTemplate ? "eilimit" : "cmlimit";
 			this.namespace = isTemplate ? "einamespace" : "cmnamespace";
+			this.ns = isTemplate || this.lists ? 0 : "0|14";
+			this.current = title;
 
 			App.status("Getting article list...");
 			this.retrieve();
 		},
 		url: function() {
 			var offset = this.offset || "";
-			var url = "http://{0}.wikipedia.org/w/api.php?action=query&list={1}&format=json&{2}={3}&{4}=0&{5}=50&redirects&callback=?{6}".format('en', this.listkey, this.titlekey, this.title, this.namespace, this.limitkey, offset);
+			var url = "http://{0}.wikipedia.org/w/api.php?action=query&list={1}&format=json&{2}={3}&{4}={5}&{6}=50&redirects&callback=?{7}";
+			url = url.format('en', this.listkey, this.titlekey, this.current, this.namespace, this.ns, this.limitkey, offset);
 			return url;
 		},
 		parse: function(res) {
-			var pages = res.query[this.listkey];
-			if(!pages.length) {
+			var results = res.query[this.listkey];
+			if(!results.length) {
 				App.error("Invalid template/category.");
 				return;
 			}
-			_.each(pages, function(p) {
-				p.id = p.pageid;;
+			var pages = [];
+			var sub = [];
+			_.each(results, function(p) {
+				if(p.ns) {
+					sub.push(p.title); // subcategory
+				} else {
+					p.id = p.pageid;;
+					pages.push(p);
+				}
 			});
 			if(this.continue && res['query-continue']) {
+				// fetch the rest of own members
 				var key = _.first(_.keys(res['query-continue'][this.listkey]));
 				var next = res['query-continue'][this.listkey][key];
 				this.offset = "&{0}={1}".format(key, next);
 				this.page++;
 				App.status("Next template articles ({0})...".format(this.page));
 				_.defer(_.bind(this.retrieve, this));
+			} else if(this.lists || sub.length) {
+				if(!this.lists) {
+					this.lists = sub; // children of toplevel
+				}
+				if(this.lists.length) {
+					// get next subcategory
+					this.current = this.lists.pop();
+					this.offset = "";
+					_.defer(_.bind(this.retrieve, this));
+				} else {
+					delete this.offset;
+				}
 			} else {
-				this.offset = null;
+				delete this.offset;
 				App.status();
 			}
 			return pages;
@@ -1356,7 +1378,6 @@ define(["jquery",
 	window.RevisionCollection = Collection.extend({
 		model: Revision,
 		loaded: 'done',
-		offset: null,
 		comparator: function(rev) {
 			return rev.get('timestamp');
 		},
@@ -1393,7 +1414,7 @@ define(["jquery",
 				_.defer(_.bind(this.retrieve, this));
 			} else {
 				this.page = 0;
-				this.offset = null;
+				delete this.offset;
 			}
 			App.status();
 			return page.revisions;
@@ -2528,7 +2549,7 @@ define(["jquery",
 			"click #clear": "clear",
 			"click #analyze": "analyzeOnClick",
 			"click #skim": "skim",
-			"click .example": "analyzeExample",
+			"click #examples button": "analyzeExample",
 			"focus #input": "focus",
 			"keypress #input": "analyzeOnEnter"
 		},
@@ -2542,12 +2563,13 @@ define(["jquery",
 			this.$clear = this.$("#clear");
 			this.$stop = this.$("#stop");
 			this.$special = this.$("#special");
-			this.$examples = this.$(".example");
+			this.$examples = this.$("#examples button");
 			this.statusEl = $('#status');
 			this.cache = $('#cache');
 			this.container = $('#content .container');
 			this.nav = $('.topbar ul.nav');
 			this.$('.search .btn').removeClass('disabled');
+			this.$examples.removeClass('disabled');
 			this.$('.search input').removeAttr('disabled');
 			this.cache.hover(function() {$(this).addClass('danger');}, function() {$(this).removeClass("danger")});
 			this.initAutocomplete();
@@ -2631,7 +2653,6 @@ define(["jquery",
 			this.$results.hide();
 			this.$continue.hide();
 			this.$analyze.hide();
-			this.$examples.hide();
 			this.$stop.show();
 			this.group = true;
 			this.skim = Group.skim;
@@ -2659,7 +2680,6 @@ define(["jquery",
 			gv.render();
 			this.input.val(Group.title);
 			this.$stop.hide();
-			this.$examples.hide();
 			this.$analyze.hide();
 			this.$clear.show();
 			this.$download.show();
@@ -2868,7 +2888,6 @@ define(["jquery",
 			App.skim = !!skim;
 			this.wipeout();
 			this.reset();
-			this.$examples.hide();
 			this.$analyze.hide();
 			this.$stop.show();
 			this.input.blur();

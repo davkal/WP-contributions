@@ -34,13 +34,10 @@
 		}
 		footer {
 			text-align: center;
-			margin-top: 0;
+			margin-top: 20px;
 		}
 		form {
 			margin-top: 18px;
-		}
-		header form .input {
-			margin-left: 60px;
 		}
 		.nav > li.hidden, .hidden {
 			display: none;
@@ -120,12 +117,6 @@
 						<button class="btn disabled info hidden" id="results">Results</button>
 						<button class="btn disabled info hidden" id="download">Download</button>
 
-						<button class="btn disabled example" title="2011 Egyptian revolution">A</button>
-						<button class="btn disabled example" title="2011 Bahraini uprising">B</button>
-						<button class="btn disabled example" title="2011 Dohuk riots">C</button>
-						<button class="btn disabled example" title="Template:Infobox_civil_conflict">T</button>
-						<button class="btn disabled example" title="Category:Dohuk_Governorate">U</button>
-						<button class="btn disabled example" title="Category:Political_riots">V</button>
 						<span id="status" class="help-inline">Loading application...</span>
 					</div>
             	</div>
@@ -134,6 +125,28 @@
       </header>
 	<div id="content">
 		<div class="container">
+			<section id="examples">
+			<div class="page-header"><h1>Analyze <small>contributions to Wikipedia</small></h1></div>
+				<div class="row">
+					<div class="span-one-third">
+						<h2>Examples</h2>
+						<p>Click one of the example articles!</p>
+					</div>
+					<div class="span-two-thirds">
+						<h3>Articles</h3>
+						<button class="btn disabled" title="2011 Egyptian revolution">Large</button>
+						<button class="btn disabled" title="2011 Bahraini uprising">Medium</button>
+						<button class="btn disabled" title="2011 Dohuk riots">Small</button>
+						<h3>Groups</h3>
+						<button class="btn disabled" title="Category:Revolutions by country">Large</button>
+						<button class="btn disabled" title="Template:Infobox_civil_conflict">Medium</button>
+						<button class="btn disabled" title="Category:Dohuk_Governorate">Small</button>
+						<!--
+						<button class="btn disabled example" title="Category:Political_riots">V</button>
+						-->
+					</div>
+				</div>
+			</section>
 			<section id="groupresults"></section>
 			<section id="overview"></section>
 			<section id="properties"></section>
