@@ -1032,14 +1032,37 @@ define(["jquery",
 			});
 			var editors = _.uniq(_.invoke(survived, 'get', 'user'));
 			this.calcSignatureDistanceSurvivors(editors);
+			this.calcSignatureDistanceSurvivorsText(editors, counter, survived);
 			return {authors: editors, revisions: survived, counter: counter};
 		},
 		calcSignatureDistanceSurvivors: function(editors) {
 			if(Article.has('location')) {
-				var authors = Article.get('authors'), editors, sd;
-				if(editors = this.get('authors') || editors) {
-					if(!_.isNaN(sd = authors.signatureDistance(editors))) {
+				editors = this.get('authors') || editors;
+				if(editors) {
+					var authorship = Article.get('authors'), sd;
+					if(!_.isNaN(sd = authorship.signatureDistance(editors))) {
 						this.set({sig_dist_survivors: sd});
+					}
+				}
+			}
+		},
+		calcSignatureDistanceSurvivorsText: function(editors, counter, revisions) {
+			if(Article.has('location')) {
+				revisions = this.get('revisions') || revisions;
+				editors = this.get('authors') || editors;
+				counter = this.get('counter') || counter;
+				if(counter && editors && revisions) {
+					var authorship = Article.get('authors'), sd;
+					// convert rev -> length to name -> length
+					var users = _.map(revisions, function(r) {
+						return [r.get('user'),  counter[r.id]];
+					});
+					var lengths = {};
+					_.each(users, function(arr){
+						lengths[arr[0]] = arr[1] + lengths[arr[0]] || 0;
+					});
+					if(!_.isNaN(sd = authorship.signatureDistance(editors, lengths))) {
+						this.set({sig_dist_survivors_text: sd});
 					}
 				}
 			}
@@ -1068,12 +1091,12 @@ define(["jquery",
 	});
 
 	/*
-		* COLLECTIONS
-		*/
+	 * COLLECTIONS
+	 */
 
 	window.Authorship = Collection.extend({
 		model: Author,
-		signatureDistance: function(authors) {
+		signatureDistance: function(authors, counter) {
 			var sd = 0, loc, dist, count;
 			var allCount = 0;
 			this.each(function(author) {
@@ -1081,8 +1104,8 @@ define(["jquery",
 				// if authors is set, take only those into account
 				if(loc && (!authors|| _.include(authors, author.id))) {
 					dist = loc.get('distance');
-					// no revision parsing, all authors have edit count
-					count = author.get('count');
+					// no revision parsing, all authors have edit count, or lookup counter 
+					count = (counter ? counter[author.id] : author.get('count')) || 0;
 					allCount += count;
 					sd += dist * count;
 				}
@@ -1429,6 +1452,7 @@ define(["jquery",
 		calcSignatureDistanceSurvivors: function() {
 			this.each(function(r) {
 				r.calcSignatureDistanceSurvivors();
+				r.calcSignatureDistanceSurvivorsText();
 			});
 		},
 		calcSignatureDistance: function(caller) {
@@ -2014,7 +2038,10 @@ define(["jquery",
 				});
 				this.textarea('Contribution size by country <br/>(Text length {0}, {1} located, {2} countries)'.format(length, ratio(total), _.size(geoCount)), ratios.join('\n'));
 				if(m.has('sig_dist_survivors')) {
-					this.display("Signature distance", "{0} km".format(m.get('sig_dist_survivors').toFixed(3)));
+					this.display("Signature distance by survived edits", "{0} km".format(m.get('sig_dist_survivors').toFixed(1)));
+				}
+				if(m.has('sig_dist_survivors_text')) {
+					this.display("Signature distance by survived text", "{0} km".format(m.get('sig_dist_survivors_text').toFixed(1)));
 				}
 			}
 			return this;
@@ -2590,7 +2617,6 @@ define(["jquery",
 // TODOS
 	
 // TODO timeline with dots for articles in group
-// TODO SD by text ratio
 // TODO move up stats for location in results()
 // TODO make Locations global for re-use (user pages)
 // TODO group analysis adds to cache results
