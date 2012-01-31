@@ -1666,11 +1666,33 @@ define(["jquery",
 				var ratio = located / all * 100;
 				var label = "Contributors ({0}, {1}% located)".format(all, ratio.toFixed(1));
 				if(!this.field) {
-					this.field = this.textarea(label, "");
+					this.field = this.textarea(label, "", 6);
 				} else {
 					this.label(this.field, label);
 				}
 				this.field.val(authors.join("\n"));
+			}
+		}
+	});
+
+	window.PerformanceView = FieldView.extend({
+		changeEvent: 'change:location',
+		render: function() {
+			if(this.model) {
+				var name;
+				var all = this.model.size();
+				var located = _.size(this.model.has('location'));
+				var located_pmcu = _.size(this.model.has('pmcu'));
+				var located_userpages = _.size(this.model.has('userpage'));
+				var located_baseline = located - located_pmcu - located_userpages;
+				function ratio(l) {
+					return "{0}%".format((l / all * 100).toFixed(1));
+				}
+				if(!this.field) {
+					this.field = this.display("Contributors located by", "");
+				}
+				var userpages = App.thorough ? ratio(located_userpages) : "n/a (check Thorough box)"
+				this.field.text("IP (anonymous) {0}, IP (PMCU) {1}, user pages {2}".format(ratio(located_baseline), ratio(located_pmcu), ratio(located_userpages)));
 			}
 		}
 	});
@@ -1710,6 +1732,7 @@ define(["jquery",
 			if(_.size(authors)) {
 				this.column(3);
 				this.subview(LocatedView, authors);
+				this.subview(PerformanceView, authors);
 			}
 			return this;
 		}
@@ -2011,7 +2034,6 @@ define(["jquery",
 				.width(w - m[1] - m[3])
 				.height(h - m[0] - m[2]);
 			
-			// TODO iqr expects sorted data, true?
 			var vis = d3.select("#"+id).selectAll("svg")
 				.data([data])
 				.enter().append("svg")
@@ -2538,6 +2560,7 @@ define(["jquery",
 // TODO move up stats for location in results()
 // TODO make Locations global for re-use (user pages)
 // TODO group analysis adds to cache results
+// TODO mention that the English Wikipedia is searched
 
 // NICE TO HAVE
 // wikiproject local pages
