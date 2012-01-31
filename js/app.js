@@ -1692,7 +1692,7 @@ define(["jquery",
 					this.field = this.display("Contributors located by", "");
 				}
 				var userpages = App.thorough ? ratio(located_userpages) : "n/a (check Thorough box)"
-				this.field.text("IP (anonymous) {0}, IP (PMCU) {1}, user pages {2}".format(ratio(located_baseline), ratio(located_pmcu), ratio(located_userpages)));
+				this.field.text("IP (anonymous) {0}, IP (PMCU) {1}, user pages {2}".format(ratio(located_baseline), ratio(located_pmcu), userpages));
 			}
 		}
 	});
@@ -2248,7 +2248,41 @@ define(["jquery",
 					});
 				});
 
-				// FIXME show only top 10
+				// top 10 for each number 
+				var grouped = _.groupBy(rows, function(r) {
+					return r[0];
+				});
+				var max = [];
+				// for each country find highest values for all measures
+				_.each(grouped, function(arr, country) {
+					var values = [country];
+					_.each(cols, function(col, index) {
+						if(col.type == 'number' && index > 2) {
+							values[index] = Math.max.apply(this, _.map(arr, function(row) {
+								return row[index];
+							}));
+						}
+					});
+					max.push(values);
+				});
+				// rank countries by measure
+				var important = [];
+				_.each(cols, function(col, index) {
+					if(col.type == 'number' && index > 2) {
+						var ranked = _.sortBy(max, function(values) {
+							return values[index];
+						});
+						// limit to top 10
+						var countries = _.map(ranked.slice(-10), function(values) {
+							return values[0];
+						});
+						important = _.union(important, countries);
+					}
+				});
+
+				rows = _.filter(rows, function(r) {
+					return _.include(important, r[0]);
+				});
 
 				var config = {
 					height: 400,
@@ -2580,7 +2614,6 @@ define(["jquery",
 			"click #analyze": "analyzeOnClick",
 			"click #skim": "skim",
 			"click #examples button": "analyzeExample",
-			"focus #input": "focus",
 			"keypress #input": "analyzeOnEnter"
 		},
 		initialize: function() {
