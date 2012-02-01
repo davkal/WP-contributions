@@ -467,7 +467,7 @@ define(["jquery",
 					if(attr.location) {
 						// just need to add the country
 						if(country = Countries.findCountry(locationCandidates)) {
-							attr.location.set({region: country});
+							attr.location.set({region: country.id});
 							locationCandidates = null;
 						}
 					}
@@ -631,13 +631,11 @@ define(["jquery",
 				// potential for a lot of fine tuning
 				"blacklisted category" : checkCategories(this, ['Living people']),
 				"blacklisted template" : checkTemplates(this, ['governor', 'officeholder']),
-				"at least 100 revisions" : !this.get('revisions').length || _.size(this.get('revisions')) >= 100,
-				"at least 100 authors" : !this.get('authors').length || _.size(this.get('authors')) >= 100,
 				"at least 25% authors located": checkLocatedAuthors(this)
 			};
 		},
-		relevant: function() {
-			return _.all(this.requirements(), function(v, r) { return v; });
+		relevant: function(reqs) {
+			return _.all(reqs || this.requirements(), function(v, r) { return v; });
 		},
 		results: function() {
 			var article = this;
@@ -646,13 +644,15 @@ define(["jquery",
 			}
 			var id = this.get('input');
 			var title = this.get('title');
+			var reqs = this.requirements();
 			var res = {
 				id: id,
 				title: title,
+				requirements: reqs,
 				analyzed: false // false means irrelevant
 			};
 
-			if(!this.has('start') || App.group && !this.relevant()) {
+			if(!this.has('start') || App.group && !this.relevant(reqs)) {
 				console.log("Article does not qualify:", title);
 				App.setItem(id, res, true);
 				// silent set, dont render useless results
@@ -727,7 +727,7 @@ define(["jquery",
 			// H3 first language
 			languages.sort();
 			res.first_lang = languages.first().get('lang');
-			var country = Countries.get(this.get('location').has('region'));
+			var country = Countries.get(this.get('location').get('region'));
 			// qualified when article has country with official langs other than english
 			res.h3 = languages.length > 1 && country && country.has('languages') 
 				&& !_.include(country.get('languages'), 'en');
@@ -1358,7 +1358,6 @@ define(["jquery",
 			var results = res.query[this.listkey];
 			if(!results.length) {
 				App.error("Invalid template/category.");
-				return;
 			}
 			var pages = [];
 			var sub = [];
@@ -1367,9 +1366,12 @@ define(["jquery",
 					sub.push(p.title); // subcategory
 				} else {
 					p.id = p.pageid;;
-					pages.push(p);
+					// no duplicates
+					if(!this.get(p.id)) {
+						pages.push(p);
+					}
 				}
-			});
+			}, this);
 			if(this.continue && res['query-continue']) {
 				// fetch the rest of own members
 				var key = _.first(_.keys(res['query-continue'][this.listkey]));
@@ -2616,6 +2618,8 @@ define(["jquery",
 
 // TODOS
 	
+// TODO change H1 to be < 7 for day-res and < 30 for month res
+// TODO add explanation to qualifications in results()
 // TODO timeline with dots for articles in group
 // TODO move up stats for location in results()
 // TODO make Locations global for re-use (user pages)
