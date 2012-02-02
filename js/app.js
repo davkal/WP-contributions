@@ -533,7 +533,7 @@ define(["jquery",
 			var revisions = new RevisionCollection;
 			var locations = new LocationCollection;
 			var languages = new LanguageCollection;
-			var traffic = new PageViews;
+			//var traffic = new PageViews;
 			var current = new Revision;
 			var bots = new Authorship(_.map(botlist.list, function(b){return {id: b};}));
 
@@ -567,7 +567,7 @@ define(["jquery",
 			revisions.bind('done', revisions.current, revisions);
 			revisions.bind('done', languages.fetchNext, languages);
 			if(!this.get('group')) {
-				revisions.bind('done', traffic.retrieve, traffic);
+				// revisions.bind('done', traffic.retrieve, traffic);
 			}
 
 			languages.bind('change', languages.fetchNext, languages);
@@ -589,7 +589,7 @@ define(["jquery",
 				revisions: revisions,
 				locations: locations,
 				languages: languages,
-				traffic: traffic,
+				// traffic: traffic,
 				current: current,
 				bots: bots
 			});
@@ -1497,9 +1497,15 @@ define(["jquery",
 			var me = this;
 			if(!this.sampled) {
 				// limit to one rev per day or month for text survival analysis
-				var chooser = App.thorough ? dformat : mformat;
+				var ts, chooser, start, beginning;
+				if(start = Article.get('start')) {
+					beginning = new Date(start);
+					beginning.setDate(beginning.getDate() + 7);
+				}
 				var grouped = this.groupBy(function(r) {
-					return chooser(r.get('timestamp'));
+					ts = r.get('timestamp');
+					chooser = App.thorough || beginning && beginning >= new Date(ts) ? dformat : mformat;
+					return chooser(ts);
 				});
 				_.each(grouped, function(list) {
 					list[0].set({selected: true});
@@ -2147,19 +2153,34 @@ define(["jquery",
 				var cols = [
 					{label: 'Date', type: 'date'},
 					{label: 'Sd(km)', type: 'number'},
-					{label: 'Distance (km)', type: 'number'},
-					{label: 'Page views', type: 'number'}
+					{label: 'Sd survived edits(km)', type: 'number'},
+					{label: 'Sd survived text(km)', type: 'number'}
 				];
 
 				// TODO annotations: day 3, anon <> regs, locals <> distant
 				var rows = _.map(revisions, function(rev, index) {
-					return [rev.get('timestamp'), rev.get('sig_dist'), undefined, undefined];
+					return [
+						rev.get('timestamp'),
+						rev.get('sig_dist'),
+						rev.get('sig_dist_survivors'),
+						rev.get('sig_dist_survivors_text')
+					];
 				});
-				// finding start and end interval for 7 days
-				start = new Date(rows[0][0]);
-				end = new Date(start);
-				end.setDate(end.getDate() + 8);
 
+				// adding analyzed revisions
+				var survivors = Article.get('revisions').has('sig_dist_survivors');
+				_.each(survivors, function(rev) {
+					if(!rev.has('sig_dist')) {
+						rows.push([
+							rev.get('timestamp'),
+							undefined,
+							rev.get('sig_dist_survivors'),
+							rev.get('sig_dist_survivors_text')
+						]);
+					}
+				});
+
+				/*
 				// adding individual distances
 				var authors = Article.get('authors'), author, loc;
 				Article.get('revisions').each(function(r) {
@@ -2180,6 +2201,7 @@ define(["jquery",
 					// avoiding NaN values
 					rows.push([start, undefined, undefined, 0]);
 				}
+				*/
 
 				var listeners = {
 				/*
@@ -2196,10 +2218,14 @@ define(["jquery",
 					}
 				*/
 				};
+
+				// finding start and end interval for 7 days
+				start = new Date(rows[0][0]);
+				end = new Date(start);
+				end.setDate(end.getDate() + 8);
+
 				var config = {
 					displayExactValues: true,
-					scaleType: 'allfixed',
-					scaleColumns: [1, 0],
 					zoomStartTime: start, 
 					zoomEndTime: end
 				};
@@ -2635,10 +2661,6 @@ define(["jquery",
 // TODOS
 	
 // TODO remove H7
-// TODO remove page views and distance from activity chart
-// TODO implement e.surv for Activiity chart
-// TODO implement t.surv for Activity chart
-// TODO disable page views
 // TODO change H10 "local contribs are more likely to prevail"
 // TODO group analysis for list of categories (cat1, cat2, cat3)
 // TODO add explanation to qualifications in results()
@@ -2872,7 +2894,7 @@ define(["jquery",
 			if(!this.group && google.visualization) { // goole stuff sometimes fails to load
 				var revisions = Article.get('revisions');
 				var current = Article.get('current');
-				var traffic = Article.get('traffic');
+				// var traffic = Article.get('traffic');
 
 				var mv = new MapView();
 				var sv = new SurvivorView();
@@ -2892,11 +2914,12 @@ define(["jquery",
 				authors.bind('done', dv.render, dv);
 
 				revisions.bind('distance', dv.render, dv);
+				revisions.bind('authorsdone', dv.render, dv);
 				revisions.bind('authorsdone', tv.render, tv);
 
 				current.bind('change:authors', sv.render, sv);
 
-				traffic.bind('loaded', dv.render, dv);
+				// traffic.bind('loaded', dv.render, dv);
 			}
 
 			// kick things off
