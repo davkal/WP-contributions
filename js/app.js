@@ -726,8 +726,10 @@ define(["jquery",
 
 			// H1,H2 timedelta created - started
 			res.delta = (res.created - res.start) / MS_PER_DAY; // in days
-			res.h1 = res.h2 = res.date_resolution 
-				&& res.date_resolution > 1 ? res.delta <= 7 : res.delta <= 30;
+			res.h1 = res.h2 = res.date_resolution && res.date_resolution > 0; 
+			if(res.h1) {
+				res.delta_short = res.date_resolution > 1 ? res.delta <= 7 : res.delta <= 30;
+			}
 
 			// H3 first language
 			languages.sort();
@@ -1777,7 +1779,7 @@ define(["jquery",
 			if(!r.h1) {
 				return "n/a (no event date in article)";
 			}
-			return r.delta ? "{0} ({1})".format(r.delta < 3 ? 'True' : 'False', r.delta.toFixed(1)) : "n/a (no start date).";
+			return r.delta ? "{0} ({1})".format(r.delta_short ? 'True' : 'False', r.delta.toFixed(1)) : "n/a (no start date).";
 		},
 		h3: function(r) {
 			return "{0} ({1})".format(r.first_lang == 'en' ? 'True' : 'False', r.first_lang);
@@ -2399,13 +2401,20 @@ define(["jquery",
 	window.GroupHypothesesView = SectionView.extend({
 		title: "Hypotheses",
 		h1: function(results, title, subtitle, total) {
-			var deltas = _.invoke(results, 'get', 'delta');
-			var avg = _.sum(deltas) / deltas.length;
-			var text = "{0} ({1} days on average)".format(avg < 3 ? 'True' : 'False', avg.toFixed(1));
+			var grouped = _.groupBy(results, function(r) {
+				return r.date_resolution > 1 ? "day" : "month";
+			});
+				
+			var avg_month = _.avg(_.invoke(grouped.month, 'get', 'delta'));
+			var avg_day = _.avg(_.invoke(grouped.day, 'get', 'delta'));
+			var text = "{0} ({1} days on average, {2} days on average for monthly resolution)".format(avg_day <= 7 && avg_month <= 30 ? 'True' : 'False', 
+				avg_day ? avg_day.toFixed(1) : "n/a", 
+				avg_month ? avg_month.toFixed(1) : "n/a");
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
-			this.display('Articles were created in the first 3 days', text);
+			this.display('Articles were created with a short time.', text);
 			this.column(2);
 			// chart
+			var deltas = _.invoke(results, 'get', 'delta');
 			var rows = _.map(_.range(Math.floor(_.max(deltas)) + 1), function(d) { return 0 });
 			_.each(deltas, function(d) {
 				rows[Math.floor(d)]++;
@@ -2625,7 +2634,6 @@ define(["jquery",
 
 // TODOS
 	
-// TODO change H1 to be < 7 for day-res and < 30 for month res
 // TODO remove H7
 // TODO remove page views and distance from activity chart
 // TODO implement e.surv for Activiity chart
