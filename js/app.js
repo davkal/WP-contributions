@@ -198,7 +198,9 @@ define(["jquery",
 		},
 		calcDistance: function(loc) {
 			if(loc) {
-				this.set({distance: Location.geodesicDistance(this, loc)});
+				var dist = Location.geodesicDistance(this, loc);
+				this.set({distance: dist});
+				return dist;
 			}
 		}
 	}, {
@@ -242,6 +244,9 @@ define(["jquery",
 			var long1 = Location.deg2rad(loc1.get('longitude'));
 			var lat2 = Location.deg2rad(loc2.get('latitude'));
 			var long2 = Location.deg2rad(loc2.get('longitude'));
+			if(lat1 == lat2 && long1 == long2) {
+				return 0;
+			}
 			var rad = Math.acos(Math.sin(lat1) * Math.sin(lat2) + Math.cos(lat1) * Math.cos(lat2) * Math.cos(long1 - long2));
 			return Math.abs(rad) * 6372.8;
 		}
@@ -1117,9 +1122,11 @@ define(["jquery",
 		addLocation: function(loc) {
 			var author = this.get(loc.id);
 			if(author) {
-				loc.calcDistance(Article.get('location'));
+				var dist = loc.calcDistance(Article.get('location'));
 				Article.get('locations').add(loc);
 				author.set({location: loc, located: true});
+			} else {
+				console.error("Author not found authorship.", loc.id);
 			}
 		},
 		addCountry: function(author, country) {
@@ -2619,6 +2626,13 @@ define(["jquery",
 // TODOS
 	
 // TODO change H1 to be < 7 for day-res and < 30 for month res
+// TODO remove H7
+// TODO remove page views and distance from activity chart
+// TODO implement e.surv for Activiity chart
+// TODO implement t.surv for Activity chart
+// TODO disable page views
+// TODO change H10 "local contribs are more likely to prevail"
+// TODO group analysis for list of categories (cat1, cat2, cat3)
 // TODO add explanation to qualifications in results()
 // TODO timeline with dots for articles in group
 // TODO move up stats for location in results()
