@@ -1346,10 +1346,11 @@ define(["jquery",
 
 	window.PageList = Collection.extend({
 		model: Page,
-		lists: null,
 		fetchPages: function(title) {
 			// template or category?
 			this.title = title;
+			this.cats = title.split("|");
+			this.catIndex = 0;
 			var prefix = title.split(':')[0];
 			if(prefix != 'Template' && prefix != 'Category') {
 				App.error('Not a valid template or category.');
@@ -1362,7 +1363,7 @@ define(["jquery",
 			this.limitkey = isTemplate ? "eilimit" : "cmlimit";
 			this.namespace = isTemplate ? "einamespace" : "cmnamespace";
 			this.ns = isTemplate || this.lists ? 0 : "0|14";
-			this.current = title;
+			this.current = this.cats[this.catIndex];
 
 			App.status("Getting article list...");
 			this.retrieve();
@@ -1391,29 +1392,37 @@ define(["jquery",
 					}
 				}
 			}, this);
+			// what next?
 			if(this.continue && res['query-continue']) {
 				// fetch the rest of own members
 				var key = _.first(_.keys(res['query-continue'][this.listkey]));
 				var next = res['query-continue'][this.listkey][key];
 				this.offset = "&{0}={1}".format(key, next);
 				this.page++;
-				App.status("Next template articles ({0})...".format(this.page));
+				App.status("Next set in articles ({0})...".format(this.page));
 				_.defer(_.bind(this.retrieve, this));
-			} else if(this.lists || sub.length) {
-				if(!this.lists) {
-					this.lists = sub; // children of toplevel
+			} else if(this.subcats || sub.length) {
+				this.offset = "";
+				// make this response's sub cats the subcats
+				if(!this.subcats) {
+					this.subcats = sub; // children of toplevel
 				}
-				if(this.lists.length) {
-					// get next subcategory
-					this.current = this.lists.pop();
-					this.offset = "";
-					_.defer(_.bind(this.retrieve, this));
-				} else {
-					delete this.offset;
+				// get next subcategory
+				this.current = this.subcats.pop();
+				// clean up in case there are more toplevel cats
+				if(!this.subcats.length) {
+					delete this.subcats;
 				}
+				App.status("Next sub-category: ({0})".format(this.current));
+				_.defer(_.bind(this.retrieve, this));
+			} else if(++this.catIndex < this.cats.length) {
+				// next main category
+				this.offset = "";
+				this.current = this.cats[this.catIndex];
+				App.status("Next category: ({0})".format(this.current));
+				_.defer(_.bind(this.retrieve, this));
 			} else {
 				delete this.offset;
-				App.status();
 			}
 			return pages;
 		}
@@ -2372,7 +2381,9 @@ define(["jquery",
 			   return a.has('analyzed');
 			});
 			this.row(['span-one-third', 'span-two-thirds']);
-			this.link("Article group", g.title, "http://{0}.wikipedia.org/wiki/{1}".format('en', g.title));
+			_.each(g.title.split("|"), function(title, index) {
+				this.link("Article group {0}".format(index ? index + 1 : ""), title, "http://{0}.wikipedia.org/wiki/{1}".format('en', title));
+			}, this);
 			var total = _.size(analyzed);
 			this.display("Progress", "{0} of {1} articles analyzed ({2}%)".format(total, g.size(), (total * 100 / g.size()).toFixed(1)));
 			if(total > 0) {
@@ -2686,11 +2697,8 @@ define(["jquery",
 
 // TODOS
 	
-// TODO group results view
-// TODO group analysis for list of categories (cat1, cat2, cat3)
 // TODO make Locations global for re-use (user pages)
 // TODO timeline with dots for articles in group
-// TODO group analysis adds to cache results
 // TODO mention that the English Wikipedia is searched
 
 // NICE TO HAVE
