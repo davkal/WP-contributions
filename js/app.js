@@ -39,7 +39,7 @@ define(["jquery",
 		return $.format.date(new Date(d), "yyyy-MM-dd");
 	}
 	function mformat(d) {
-		return $.format.date(new Date(d), "yyyyMM");
+		return $.format.date(new Date(d), "yyyy-MM");
 	}
 
 	// Based on http://trentrichardson.com/2010/04/06/compute-linear-regressions-in-javascript/
@@ -73,6 +73,22 @@ define(["jquery",
 
 		return lr;
 	}
+
+	window.distributionStats = function(values) {
+	   values = values.slice(0);
+	   values.sort(d3.ascending);
+
+	   var res = {};
+	   res.n = _.size(values);
+	   res.mean = _.avg(values);
+	   res.median = d3.median(values); 
+	   res.q1 = d3.quantile(values, .25); 
+	   res.q3 = d3.quantile(values, .75); 
+	   res.iqr = res.q3 - res.q1;
+	   res.max = d3.max(values);
+	   res.min = d3.min(values);
+	   return res;
+	};	   
 
 	window.Model = Backbone.Model.extend({
 		checkDate: function(obj, attr) {
@@ -681,7 +697,7 @@ define(["jquery",
 			var revisions = this.get('revisions');
 			var languages = this.get('languages');
 
-			var grouped, location, author, revision, username, list, count, limit;
+			var grouped, location, author, revision, username, list, count, limit, date;
 			revision = revisions.at(0);
 			res.created = new Date(revision.get('timestamp'));
 			res.start = this.get('start');
@@ -690,25 +706,25 @@ define(["jquery",
 
 			// make start,end an open interval
 			res.end.setDate(res.end.getDate() + 1);
+			res.beginning = new Date(res.start);
+			var offset = res.date_resolution > 1 ? 7 : 30;
+			res.beginning.setDate(res.beginning.getDate() + offset);
 			var gr = revisions.groupBy(function(r) {
-				var date = new Date(r.get('timestamp'));
-				if(date < res.start) {
-					return 'before';
+				date = new Date(r.get('timestamp'));
+				if(date < res.beginning) {
+					return 'early';
 				}
-				if(date < res.end) {
-					return 'during';
-				}
-				return 'after';
+				return 'later';
 			});
 
 			// Stats for locations
 			var locations = _.compact(authors.pluck('location'));
 			if(locations.length) {
 				var dists = _.map(locations, function(l) { return l.get('distance')});
-				res.dist_mean = _.sum(dists) / dists.length;
-				dists.sort(d3.ascending);
-				res.dist_q1 = d3.quantile(dists, .25);
-				res.dist_q3 = d3.quantile(dists, .75);
+				var stats = distributionStats(dists);
+				res.dist_mean = stats.mean;
+				res.dist_q1 = stats.q1;
+				res.dist_q3 = stats.q3;
 
 				res.located = locations.length;
 				res.located_ratio = locations.length / authors.length;
@@ -723,6 +739,8 @@ define(["jquery",
 			} else {
 				console.log("No author locations.", title);
 			}
+
+			// res.hX -> article qualifies for hypothesis X
 
 			// H1,H2 timedelta created - started
 			res.delta = (res.created - res.start) / MS_PER_DAY; // in days
@@ -751,7 +769,7 @@ define(["jquery",
 				res.h4 = true;
 			} else {
 				res.h4 = false;
-				console.log("No creator location.", title, revision.get('user'));
+				//console.log("No creator location.", title, revision.get('user'));
 			}
 
 			// general stats on located text survival
@@ -763,39 +781,24 @@ define(["jquery",
 			}));
 			res.located_text_ratio = res.located_text / revision.get('length');
 
-			// H5 date range "beginning" 3 days
-			res.h5 = res.date_resolution > 0;
+			// H5 / H6 early stats
+			res.h5 = res.h6 = res.date_resolution > 0 && _.size(gr.early);
 			if(res.h5) {
-				res.beginning = new Date(res.start);
-				var offset = res.date_resolution > 1 ? 7 : 30;
-				res.beginning.setDate(res.beginning.getDate() + offset);
-				// beginning is part of during
-				var earlies;
-				if(gr.during || gr.after) {
-					earlies = _.filter(_.compact(_.union(gr.during, gr.after)), function(r) {
-						return new Date(r.get('timestamp')) < res.beginning;
-					});
-				}
-
 				// H5 anon/regs count beginning
-				if(_.size(earlies)) {
-					grouped = _.groupBy(earlies, function(r) {
-						username = r.get('user');
-						if(author = authors.get(username)) {
-							return author.get('ip') ? 'anon' : 'reg';
-						}
-						return 'bot';
-					});
-					res.early_anon_count = _.size(grouped.anon);
-					res.early_registered_count = _.size(grouped.reg);
-					res.early_author_count = res.early_anon_count + res.early_registered_count;
-				}
+				grouped = _.groupBy(gr.early, function(r) {
+					username = r.get('user');
+					if(author = authors.get(username)) {
+						return author.get('ip') ? 'anon' : 'reg';
+					}
+					return 'bot';
+				});
+				res.early_anon_count = _.size(grouped.anon);
+				res.early_registered_count = _.size(grouped.reg);
+				res.early_author_count = res.early_anon_count + res.early_registered_count;
 				res.h5 = res.early_author_count >= 10;
-			}
 
-			// H6 local/distant count (dist < q1) during event
-			if(gr.during) {
-				grouped = _.groupBy(gr.during, function(r) {
+				// H6 local/distant count (dist < q1) 
+				grouped = _.groupBy(gr.early, function(r) {
 					username = r.get('user');
 					if(author = authors.get(username)) {
 						if(location = author.get('location')) {
@@ -808,87 +811,86 @@ define(["jquery",
 					}
 					return 'nolocation';
 				});
-				res.during_local_count = _.size(grouped.local);
-				res.during_distant_count = _.size(grouped.distant);
-				res.during_no_location_count = _.size(grouped.nolocation);
-				res.during_located_count = res.during_local_count + res.during_distant_count;
+				res.early_local_count = _.size(grouped.local);
+				res.early_distant_count = _.size(grouped.distant);
+				res.early_no_location_count = _.size(grouped.nolocation);
+				res.early_located_count = res.early_local_count + res.early_distant_count;
+				res.h6 = res.early_located_count >= 10;
 			}
-			res.h6 = res.during_located_count >= 10;
 
-			// H7 size of all revs after end
-			if(gr.after) {
-				list = _.has(gr.after, 'selected');
-				if(list.length > 1) {
-					res.after_text_lengths = _.map(list, function(r) {
-						return [r.get('timestamp'), r.get('length')];
-					});
-				}
-			}
-			res.h7 = res.after_text_lengths && res.after_text_lengths.length >= 10;
-			
-			// H8 anon/regs count after end
-			if(gr.after) {
-				grouped = _.groupBy(gr.after, function(r) {
-					username = r.get('user');
-					if(author = authors.get(username)) {
-						return author.get('ip') ? 'anon' : 'reg';
-					}
-					return 'bot';
+			// H7 / H8 later stats
+			res.h7 = res.h8 = res.date_resolution > 0 && _.size(gr.later) >= 10;
+			if(res.h7) {
+				var subgrouped, part, ratio;
+				// bucket by month
+				grouped = _.groupBy(gr.later, function(r) {
+					return mformat(r.get('timestamp'));
 				});
-				res.after_anon_count = _.size(grouped.anon);
-				res.after_registered_count = _.size(grouped.reg);
-				res.after_author_count = res.after_anon_count + res.after_registered_count;
-			}
-			res.h8 = res.after_author_count && res.after_author_count >= 10;
 
-			// H9 [ts, SD(all)] for all revs after end 
-			if(gr.after) {
+				// H7 get anons for each bucket
 				list = [];
-				_.each(gr.after, function(r) {
+				_.each(grouped, function(arr, ts) {
+					subgrouped = _.groupBy(arr, function(r) {
+						username = r.get('user');
+						if(author = authors.get(username)) {
+							return author.get('ip') ? 'anon' : 'reg';
+						}
+						return 'bot';
+					})
+					ratio = 0;
+					part = _.size(subgrouped.anon);
+					if(part) {
+						ratio = part / (part + _.size(subgrouped.reg));
+					}
+					list.push([Date.parse(ts + "-01"), ratio]);
+				});
+				res.later_anon_vs_reg = list;
+
+				// H8 local/distant count (dist < q1) 
+				list = [];
+				_.each(grouped, function(arr, ts) {
+					subgrouped = _.groupBy(arr, function(r) {
+						username = r.get('user');
+						if(author = authors.get(username)) {
+							if(location = author.get('location')) {
+								var local = article.local(author, res.dist_q1);
+								if(_.isUndefined(local)) {
+									return 'nolocation';
+								}
+								return local ? 'local' : 'distant';
+							}
+						}
+						return 'nolocation';
+					})
+					ratio = 0;
+					part = _.size(subgrouped.local);
+					if(part) {
+						ratio = part / (part + _.size(subgrouped.distant));
+					}
+					list.push([Date.parse(ts + "-01"), ratio]);
+				});
+				res.later_local_vs_dist = list;
+			}
+
+			// H9 and H10, local contribs prevail and local text is likely to stick
+			if(gr.later) {
+				list = [];
+				var last_dist;
+				_.each(gr.later, function(r) {
 					if(r.has('sig_dist')) {
-						list.push([r.get('timestamp'), r.get('sig_dist')]);
+						last_dist = r.get('sig_dist');
+					}
+					if(!_.isUndefined(last_dist) && r.has('sig_dist_survivors')) {
+						list.push([
+							r.get('timestamp'), 
+							last_dist ? r.get('sig_dist_survivors') / last_dist : 1, 
+							last_dist ? r.get('sig_dist_survivors_text') / last_dist : 1
+						]);
 					}
 				});
-				if(list.length > 1) {
-					res.after_sig_dists = list;
-				}
+				res.later_sig_dist_ratios = list;
 			}
-			res.h9 = res.after_sig_dists && res.after_sig_dists.length >= 10;
-
-			// H10 for all revs during count local and distant survivors
-			if(gr.during) {
-				list = _.has(gr.during, 'selected');
-				if(list.length > 1) {
-					res.during_local_ratios = _.map(list, function(r) {
-						grouped = _.groupBy(r.get('authors'), function(username) {
-							if(author = authors.get(username)) {
-								if(location = author.get('location')) {
-									var local = article.local(author, res.dist_q1);
-									if(_.isUndefined(local)) {
-										return 'nolocation';
-									}
-									return local ? 'local' : 'distant';
-								}
-							}
-							return 'nolocation';
-						});
-						return [r.get('timestamp'), _.size(grouped.local) || 0, _.size(grouped.distant) || 0];
-					});
-				}
-			}
-			res.h10 = res.during_local_ratios && res.during_local_ratios.length >= 10;
-
-			// H11 [ts, SD(survivor)] for all revs after end 
-			if(gr.after) {
-				list = _.has(gr.after, 'selected');
-				list = _.has(list, 'sig_dist_survivors');
-				if(list.length > 1) {
-					res.after_sig_dists_survivors = _.map(list, function(r) {
-						return [r.get('timestamp'), r.get('sig_dist_survivors')];
-					});
-				}
-			}
-			res.h11 = res.after_sig_dists_survivors && res.after_sig_dists_survivors.length >= 10;
+			res.h9 = res.h10 = res.later_sig_dist_ratios && res.later_sig_dist_ratios.length >= 10;
 
 			App.status();
 			this.set({results: res});
@@ -968,7 +970,7 @@ define(["jquery",
 			this.current = this.offset || new Date();
 			this.current.setDate(1);
 			this.title = this.title || Article.get('title');
-			var url = "http://stats.grok.se/json/en/{0}/{1}".format(mformat(this.current), this.title.replace(/ /g, "_"));
+			var url = "http://stats.grok.se/json/en/{0}/{1}".format(mformat(this.current).replace('-', ""), this.title.replace(/ /g, "_"));
 			return PROXY_URL + '?' + $.param({url: url});
 		},
 		parse: function(res) {
@@ -1469,6 +1471,7 @@ define(["jquery",
 			});
 		},
 		calcSignatureDistance: function(caller) {
+			// for all revisions
 			if(Article.has('location')) {
 				var located = this.located(), sd, dist;
 				var locations = Article.get('locations');
@@ -1816,46 +1819,43 @@ define(["jquery",
 		},
 		h6: function(r) {
 			if(!r.h6) {
-				return "n/a (not enough revisions during event)."
+				return "n/a (not enough located early revisions)."
 			}
-			return "{0} ({1} local, {2} distant, {3} unknown)".format(r.during_local_count > r.during_distant_count ? 'True' : 'False', r.during_local_count, r.during_distant_count, r.during_no_location_count);
+			return "{0} ({1} local, {2} distant, {3} unknown)".format(r.early_local_count > r.early_distant_count ? 'True' : 'False', r.early_local_count, r.early_distant_count, r.early_no_location_count);
 		},
 		h7: function(r) {
 			if(!r.h7) {
-				return "n/a (not enough revisions after event)."
+				return "n/a (not enough revisions)."
 			}
-			var lr = linearRegression(r.after_text_lengths);
+			var lr = linearRegression(r.later_anon_vs_reg);
 			return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r < 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
 		},
 		h8: function(r) {
-			if(!r.h8) {
-				return "n/a (no late revisions or event still ongoing)."
+			if(!r.h7) {
+				return "n/a (not enough revisions)."
 			}
-			return "{0} ({1} registered, {2} anonymous)".format(r.after_registered_count > r.after_anon_count ? 'True' : 'False', r.after_registered_count, r.after_anon_count);
+			var lr = linearRegression(r.later_local_vs_dist);
+			return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r < 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
 		},
 		h9: function(r) {
 			if(!r.h9) {
-				return "n/a (not enough located revisions after event or still ongoing)."
+				return "n/a (not enough located revisions)."
 			}
-			var lr = linearRegression(r.after_sig_dists);
-			return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r > 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
+			var ratios = _.map(r.later_sig_dist_ratios, function(arr) {
+				return arr[1];
+			});
+			var stats = distributionStats(ratios);
+			return "{0} (sd / e.surv, mean: {1}, median: {2}, n: {3})".format(stats.mean < 1 ? 'True' : 'False', stats.mean.toFixed(3), stats.median.toFixed(3), stats.n);
 		},
 		h10: function(r) {
 			if(!r.h10) {
-				return "n/a (not enough located revisions during event)."
+				return "n/a (not enough located revisions)."
 			}
-			var moreLocals = 0;
-			_.each(r.during_local_ratios, function(arr) {
-				moreLocals += !arr[2] || (arr[1] > arr[2]) ? 1 : 0;
+			var ratios = _.map(r.later_sig_dist_ratios, function(arr) {
+				return arr[2];
 			});
-			return "{0} ({1}/{2} revisions with more locals)".format(r.during_local_ratios.length == moreLocals ? 'True' : 'False', moreLocals, r.during_local_ratios.length);
-		},
-		h11: function(r) {
-			if(!r.h11) {
-				return "n/a (not enough located revisions after event or still ongoing)."
-			}
-			var lr = linearRegression(r.after_sig_dists_survivors);
-			return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r > 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
+			var stats = distributionStats(ratios);
+			return "{0} (sd / t.surv, mean: {1}, median: {2}, n: {3})".format(stats.mean < 1 ? 'True' : 'False', stats.mean.toFixed(3), stats.median.toFixed(3), stats.n);
 		},
 		render: function() {
 			var r = Article.get('results');
@@ -1865,63 +1865,52 @@ define(["jquery",
 				return this;
 			}
 			// single article hypotheses
-			this.display('H1. Article was created after 7/30 days', this.h1(r));
+			this.display('H1. Article was created after short time', this.h1(r));
 			// H2 relates to a group of articles
 			this.display('H2. Recent articles are created sooner', "n/a (single article).");
 			this.display('H3. First article was created in English', this.h3(r));
-			this.display('H4. Creator was a local', this.h4(r));
+			this.display('H4. Creator was local', this.h4(r));
 			this.display('H5. Most of early contributors were anonymous', this.h5(r));
-			this.display('H6. Most of contributions during the event were local', this.h6(r));
-			this.display('H7. Revisions are getting smaller in length after event', this.h7(r));
-			this.display('H8. Most late contributors were registered users', this.h8(r));
-			this.display('H9. Spatial distribution less local after event', this.h9(r));
-			this.display('H10. Text consists of more local contributions during event', this.h10(r));
-			this.display('H11. Spatial distribution of surviving contribution becomes less local', this.h11(r));
+			this.display('H6. Most of early contributors were local', this.h6(r));
+			this.display('H7. Share of anonymous contributions decreaes over time', this.h7(r));
+			this.display('H8. Share of local contributions decreaes over time', this.h8(r));
+			this.display('H9. Local contributions are more likely to survive', this.h9(r));
+			this.display('H10. Text from local contributions is more likely to survive', this.h10(r));
 
 			this.column(2);
 			var cols, chart;
 
-			// H7 article length chart
+			// H7 anon vs. reg
 			if(r.h7) {
 				chart = this.subview(GoogleChartView);
 				cols = [
 					{label: 'Date', type: 'date'},
 					{label: 'Length', type: 'number'}
 				];
-				chart.renderTable('LineChart', cols, r.after_text_lengths, "H7. Text lengths after event");
+				chart.renderTable('LineChart', cols, r.later_anon_vs_reg, "H7. Anonymous vs. registered users");
 			}
 
-			// H9 sig dists after event chart
-			if(r.h9) {
+			// H8 local vs. distant
+			if(r.h8) {
 				chart = this.subview(GoogleChartView);
 				cols = [
 					{label: 'Date', type: 'date'},
-					{label: 'Sd(km)', type: 'number'}
+					{label: 'Length', type: 'number'}
 				];
-				chart.renderTable('LineChart', cols, r.after_sig_dists, "H9. Signature distance after event");
+				chart.renderTable('LineChart', cols, r.later_local_vs_dist, "H8. Local vs. distant users");
 			}
 
-			// H10 local vs distant column chart
+			// H9 / H10 local stickiness
 			if(r.h10) {
 				chart = this.subview(GoogleChartView);
 				cols = [
 					{label: 'Date', type: 'date'},
-					{label: 'Local', type: 'number'},
-					{label: 'Distant', type: 'number'}
+					{label: 'e.surv ratio', type: 'number'},
+					{label: 't.surv ratio', type: 'number'}
 				];
-				chart.renderTable('LineChart', cols, r.during_local_ratios, "H10. Contributor localness of text survival during event");
+				chart.renderTable('LineChart', cols, r.later_sig_dist_ratios, "H9, H10. Contributor localness of text survival during event");
 			}
 
-			// H11 sig dists survivors after chart
-			if(r.h11) {
-				chart = this.subview(GoogleChartView);
-				cols = [
-					{label: 'Date', type: 'date'},
-					{label: 'Sd(km)', type: 'number'}
-				];
-				chart.renderTable('LineChart', cols, r.after_sig_dists_survivors, "H11. Signature distance (survivors) after event");
-			}
-			
 			return this;
 		}
 	});
@@ -2666,12 +2655,9 @@ define(["jquery",
 
 // TODOS
 	
-// TODO remove H7
-// TODO change H10 "local contribs are more likely to prevail"
 // TODO group analysis for list of categories (cat1, cat2, cat3)
 // TODO add explanation to qualifications in results()
 // TODO timeline with dots for articles in group
-// TODO move up stats for location in results()
 // TODO make Locations global for re-use (user pages)
 // TODO group analysis adds to cache results
 // TODO mention that the English Wikipedia is searched
