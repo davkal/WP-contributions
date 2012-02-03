@@ -1291,6 +1291,7 @@ define(["jquery",
 			this.geoMapping = {
 				// geo-region -> WP title
 				'Bahamas': 'The Bahamas',
+				'Iran, Islamic Republic of': 'Iran',
 				'Korea, Republic of': 'South Korea',
 				'Ireland': 'Republic of Ireland',
 				'Russian Federation': 'Russia'
