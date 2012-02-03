@@ -875,17 +875,19 @@ define(["jquery",
 			// H9 and H10, local contribs prevail and local text is likely to stick
 			if(gr.later) {
 				list = [];
-				var last_dist;
+				var last_dist, esurv, tsurv;
 				_.each(gr.later, function(r) {
 					if(r.has('sig_dist')) {
 						last_dist = r.get('sig_dist');
 					}
 					if(!_.isUndefined(last_dist) && r.has('sig_dist_survivors')) {
+						esurv = r.get('sig_dist_survivors');
+						tsurv = r.get('sig_dist_survivors_text');
 						list.push([
-							r.get('timestamp'), 
+							r.get('timestamp'),
 							1, // baseline
-							last_dist ? r.get('sig_dist_survivors') / last_dist : 1, 
-							last_dist ? r.get('sig_dist_survivors_text') / last_dist : 1
+							last_dist && !_.isUndefined(esurv) ? esurv / last_dist : 1,
+							last_dist && !_.isUndefined(tsurv) ? tsurv / last_dist : 1
 						]);
 					}
 				});
@@ -1036,7 +1038,7 @@ define(["jquery",
 			_.each(tokens, function(token, index) {
 				revid = parseInt(token.replace("{{", "").replace("}}", "").split(",")[1]);
 				if(revisions.get(revid)) {
-					counter[revid] = splits[index].length + counter[revid] || 0;
+					counter[revid] = splits[index].length + (counter[revid] || 0);
 				}
 			});
 			var survived = _.map(_.keys(counter), function(revid) {
@@ -1052,7 +1054,7 @@ define(["jquery",
 				editors = this.get('authors') || editors;
 				if(editors) {
 					var authorship = Article.get('authors'), sd;
-					if(!_.isNaN(sd = authorship.signatureDistance(editors))) {
+					if(!_.isUndefined(sd = authorship.signatureDistance(editors))) {
 						this.set({sig_dist_survivors: sd});
 					}
 				}
@@ -1071,9 +1073,9 @@ define(["jquery",
 					});
 					var lengths = {};
 					_.each(users, function(arr){
-						lengths[arr[0]] = arr[1] + lengths[arr[0]] || 0;
+						lengths[arr[0]] = arr[1] + (lengths[arr[0]] || 0);
 					});
-					if(!_.isNaN(sd = authorship.signatureDistance(editors, lengths))) {
+					if(!_.isUndefined(sd = authorship.signatureDistance(editors, lengths))) {
 						this.set({sig_dist_survivors_text: sd});
 					}
 				}
@@ -1886,7 +1888,7 @@ define(["jquery",
 				chart = this.subview(GoogleChartView);
 				cols = [
 					{label: 'Date', type: 'date'},
-					{label: 'Length', type: 'number'}
+					{label: 'Ratio of anonymous', type: 'number'}
 				];
 				chart.renderTable('LineChart', cols, r.later_anon_vs_reg, "H7. Anonymous vs. registered users");
 			}
@@ -1896,7 +1898,7 @@ define(["jquery",
 				chart = this.subview(GoogleChartView);
 				cols = [
 					{label: 'Date', type: 'date'},
-					{label: 'Length', type: 'number'}
+					{label: 'Ratio of locals', type: 'number'}
 				];
 				chart.renderTable('LineChart', cols, r.later_local_vs_dist, "H8. Local vs. distant users");
 			}
@@ -2374,6 +2376,7 @@ define(["jquery",
 				var relevant = _.filter(analyzed, function(a) {
 					return a.get('analyzed');
 				});
+				var chart, cols, rows, config;
 				var count = _.size(relevant);
 				if(count) {
 					var located = _.avg(_.map(relevant , function(a){return a.get('located_ratio')})) * 100;
@@ -2387,15 +2390,16 @@ define(["jquery",
 					this.display("Located text in latest revision", "{0}% (using PMCU and userpages)".format(located_text.toFixed(1)));
 
 					this.column(2);
-					var chart = this.subview(GoogleChartView);
-					var cols = [
+					chart = this.subview(GoogleChartView);
+					cols = [
 						{label: 'Hypothesis', type: 'string'},
-						{label: 'Qualified', type: 'number'},
+						{label: 'Not an event article', type: 'number'},
 						{label: 'Not qualified', type: 'number'},
-						{label: 'Not an event article', type: 'number'}
+						{label: 'Qualified', type: 'number'}
 					];
-					var rows = [], func, not_qualified, qualified;
-					_.each(_.range(11), function(i) {
+					rows = [];
+					var func, not_qualified, qualified;
+					_.each(_.range(10), function(i) {
 						func = "h{0}".format(i + 1);
 						not_qualified = 0;
 						qualified = 0;
@@ -2406,9 +2410,9 @@ define(["jquery",
 								not_qualified++;
 							}
 						});
-						rows.push([func.toUpperCase(), qualified, not_qualified, total - qualified - not_qualified]);
+						rows.push([func.toUpperCase(), total - qualified - not_qualified, not_qualified, qualified]);
 					});
-					var config = {
+					config = {
 						isStacked: true, 
 						title: 'Articles qualified: {0} ({1}% of all)'.format(count, (count * 100 / g.size()).toFixed(1))
 					};
@@ -2416,6 +2420,32 @@ define(["jquery",
 				} else {
 					this.display("Article analysis", "No article qualified yet.");
 				}
+				this.column(2);
+				// rejection issues
+				chart = this.subview(GoogleChartView);
+				cols = [
+					{label: 'Hypothesis', type: 'string'},
+					{label: 'Articles', type: 'number'}
+				];
+				var rejections = {}, reqs;
+				_.each(_.difference(analyzed, relevant), function(a) {
+					reqs = a.get('requirements');
+					_.each(reqs, function(value, req) { 
+						if(!value) {
+							rejections[req] = 1 + (rejections[req] || 0);
+						}
+					});
+				});
+				rows = [];
+				_.each(rejections, function(num, req) {
+					rows.push([req, num]);
+				});
+				config = {
+					hAxis: {slantedText: false}, 
+					title: 'Distribution of articles by missed requirements'
+				};
+				chart.renderTable('ColumnChart', cols, rows, config);
+
 			}
 		}
 	});
@@ -2658,7 +2688,6 @@ define(["jquery",
 // TODOS
 	
 // TODO group analysis for list of categories (cat1, cat2, cat3)
-// TODO add explanation to qualifications in results()
 // TODO timeline with dots for articles in group
 // TODO make Locations global for re-use (user pages)
 // TODO group analysis adds to cache results
