@@ -2078,7 +2078,7 @@ define(["jquery",
 				m = [10, 50, 20, 50]; // top right bottom left
 
 			var chart = d3.chart.box()
-				.whiskers(iqr(1.5))
+				.whiskers(iqr(2))
 				.width(w - m[1] - m[3])
 				.height(h - m[0] - m[2]);
 			
@@ -2417,6 +2417,7 @@ define(["jquery",
 					});
 					config = {
 						isStacked: true, 
+						legend: {position: 'none'},
 						title: 'Articles qualified: {0} ({1}% of all)'.format(count, (count * 100 / g.size()).toFixed(1))
 					};
 					chart.renderTable('ColumnChart', cols, rows, config);
@@ -2445,6 +2446,7 @@ define(["jquery",
 				});
 				config = {
 					hAxis: {slantedText: false}, 
+					legend: {position: 'none'},
 					title: 'Distribution of articles by missed requirements'
 				};
 				chart.renderTable('ColumnChart', cols, rows, config);
@@ -2458,7 +2460,7 @@ define(["jquery",
 		title: "Hypotheses",
 		h1: function(results, title, subtitle, total) {
 			var grouped = _.groupBy(results, function(r) {
-				return r.date_resolution > 1 ? "day" : "month";
+				return r.get('date_resolution') > 1 ? "day" : "month";
 			});
 				
 			var avg_month = _.avg(_.invoke(grouped.month, 'get', 'delta'));
@@ -2491,7 +2493,7 @@ define(["jquery",
 			});
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 			var lr = linearRegression(rows);
-			var text = "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r < 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
+			var text = "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r < 0 ? "True" : "False", lr.r.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
 			this.display('Recent articles have a shorter delay', text);
 			this.display('Scatter plot', "All delays between event start date and date of earliest revision.");
 			this.column(2);
@@ -2514,6 +2516,10 @@ define(["jquery",
 			rows = _.map(rows, function(arr, l) {
 				return [l, arr.length];
 			});
+			rows = _.sortBy(rows, function(arr) {
+				return arr[1];
+			});
+			rows.reverse();
 			var chart = this.subview(GoogleChartView);
 			var cols = [
 				{label: 'Language', type: 'string'},
@@ -2523,7 +2529,7 @@ define(["jquery",
 		},
 		h4: function(results, title, subtitle, total) {
 			var residents = _.filter(results, function(r) {
-				return r.get('creator_resident');
+				return r.get('creator_citizen');
 			});
 			var ratio = residents.length / results.length;
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
@@ -2532,7 +2538,7 @@ define(["jquery",
 			this.column(2);
 			var rows = [
 				['Same country', residents.length],
-				['Differen country', results.length - residents.length],
+				['Different country', results.length - residents.length],
 				['Unknown', total - results.length]
 			];
 			var chart = this.subview(GoogleChartView);
@@ -2548,7 +2554,7 @@ define(["jquery",
 			});
 
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
-			this.display("Anonymous contributions in the beginning", "{0} articles have contributions in the first 7/30 days.".format(results.length));
+			this.display("Anonymous contributions in the beginning", "{0} articles have contributions in the beginning.".format(results.length));
 			if(values.length) {
 				this.column(2);
 				var chart = this.subview(BoxChartView);
@@ -2557,11 +2563,11 @@ define(["jquery",
 		},
 		h6: function(results, title, subtitle) {
 			var values = _.map(results, function(e) {
-				return e.get('during_local_count') / e.get('during_located_count');
+				return e.get('early_local_count') / e.get('early_located_count');
 			});
 
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
-			this.display("Proporting of local contributions during the event", "{0} articles have located contributions during the event.".format(results.length));
+			this.display("Local contributions in the beginning", "{0} articles have located contributions in the beginning.".format(results.length));
 			if(values.length) {
 				this.column(2);
 				var chart = this.subview(BoxChartView);
@@ -2570,11 +2576,11 @@ define(["jquery",
 		},
 		h7: function(results, title, subtitle) {
 			var values = _.map(results, function(res) {
-				return linearRegression(res.get('after_text_lengths')).r;
+				return linearRegression(res.get('later_anon_vs_reg')).r;
 			});
 
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
-			this.display("Correlation between article age and text length", "{0} articles have contributions after the event.".format(results.length));
+			this.display("Correlation between frequency of anonymous contributions and article age", "{0} articles have contributions.".format(results.length));
 			if(values.length) {
 				this.column(2);
 				var chart = this.subview(BoxChartView);
@@ -2582,12 +2588,12 @@ define(["jquery",
 			}
 		},
 		h8: function(results, title, subtitle) {
-			var values = _.map(results, function(e) {
-				return e.get('after_anon_count') / e.get('after_author_count');
+			var values = _.map(results, function(res) {
+				return linearRegression(res.get('later_local_vs_dist')).r;
 			});
 
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
-			this.display("Anonymous contributions in the end", "{0} articles have contributions after the event.".format(results.length));
+			this.display("Correlation between frequency of local contributions and article age", "{0} articles have enough located contributions.".format(results.length));
 			if(values.length) {
 				this.column(2);
 				var chart = this.subview(BoxChartView);
@@ -2596,11 +2602,15 @@ define(["jquery",
 		},
 		h9: function(results, title, subtitle) {
 			var values = _.map(results, function(res) {
-				return linearRegression(res.get('after_sig_dists')).r;
+				var ratios = _.map(res.get('later_sig_dist_ratios'), function(arr) {
+					return arr[2] * 100;
+				});
+				var stats = distributionStats(ratios);
+				return stats.mean;
 			});
 
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
-			this.display("Correlation between article age and localness", "{0} articles have contributions after the event.".format(results.length));
+			this.display("Means of e.surv ratios, baseline = 100, lower values suggest local contributions prevailed ", "{0} articles have enough located contributions.".format(results.length));
 			if(values.length) {
 				this.column(2);
 				var chart = this.subview(BoxChartView);
@@ -2609,27 +2619,15 @@ define(["jquery",
 		},
 		h10: function(results, title, subtitle) {
 			var values = _.map(results, function(res) {
-				var ratios = _.map(res.get('during_local_ratios'), function(arr) {
-					return [arr[0], arr[1] / (arr[1]+arr[2])];
+				var ratios = _.map(res.get('later_sig_dist_ratios'), function(arr) {
+					return arr[3] * 100;
 				});
-				return linearRegression(ratios).r;
+				var stats = distributionStats(ratios);
+				return stats.mean;
 			});
 
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
-			this.display("Proportion of local contributions staying in the text during the event", "{0} articles have locatable contributions during the event.".format(results.length));
-			if(values.length) {
-				this.column(2);
-				var chart = this.subview(BoxChartView);
-				chart.render(values);
-			}
-		},
-		h11: function(results, title, subtitle) {
-			var values = _.map(results, function(res) {
-				return linearRegression(res.get('after_sig_dists_survivors')).r;
-			});
-
-			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
-			this.display("Correlation between article age and localness", "{0} articles have contributions after the event.".format(results.length));
+			this.display("Means of t.surv ratios, baseline = 100, lower values suggest local text prevailed ", "{0} articles have enough located contributions.".format(results.length));
 			if(values.length) {
 				this.column(2);
 				var chart = this.subview(BoxChartView);
@@ -2651,19 +2649,17 @@ define(["jquery",
 					// H4
 					"Articles about political events are created by people in the events’ proximity.",
 					// H5
-					"In the beginning of the event anonymous users contribute more than registered users.",
+					"In the beginning of the event most contributors were anonymous.",
 					// H6
-					"For the duration of the event there are more local contributions than distant ones.",
+					"In the beginning of the event most contributors were local.",
 					// H7
-					"Articles of a political event that has ended will continuously shrink in size.",
+					"The share of anonymous contributions decreases over time.",
 					// H8
-					"After an event has ended, there will be more contributions from registered users than from anonymous ones.",
+					"The share of local contributions decreases over time.",
 					// H9
-					"After an event has ended, the spatial distribution of the contributors will become less local.",
+					"Local contributions are more likely to survive.",
 					// H10
-					"For the duration of the event the article text contains more local contributions than distant ones.",
-					// H11
-					"After an event has ended, the spatial distribution of the surviving contributions will become less local."
+					"Text from local contributions is more likely to survive."
 				];
 				var list, func, title;
 				var total = _.size(g.filter(function(a) {
@@ -2690,9 +2686,10 @@ define(["jquery",
 
 // TODOS
 	
+// TODO group results view
 // TODO group analysis for list of categories (cat1, cat2, cat3)
-// TODO timeline with dots for articles in group
 // TODO make Locations global for re-use (user pages)
+// TODO timeline with dots for articles in group
 // TODO group analysis adds to cache results
 // TODO mention that the English Wikipedia is searched
 
