@@ -1032,7 +1032,9 @@ define(["jquery",
 			var counter = {}, revid, revision;
 			_.each(tokens, function(token, index) {
 				revid = parseInt(token.replace("{{", "").replace("}}", "").split(",")[1]);
-				counter[revid] = splits[index].length + counter[revid] || 0;
+				if(revisions.get(revid)) {
+					counter[revid] = splits[index].length + counter[revid] || 0;
+				}
 			});
 			var survived = _.map(_.keys(counter), function(revid) {
 				return revisions.get(revid);
@@ -1497,14 +1499,20 @@ define(["jquery",
 			var me = this;
 			if(!this.sampled) {
 				// limit to one rev per day or month for text survival analysis
-				var ts, chooser, start, beginning;
+				var ts, chooser, start, beginning, end, cutoff;
 				if(start = Article.get('start')) {
 					beginning = new Date(start);
 					beginning.setDate(beginning.getDate() + 7);
+					if(end = Article.get('end')) {
+						cutoff = new Date(end);
+						cutoff.setMonth(cutoff.getMonth() + 3);
+					}
+				} else {
+					cutoff = Article.get('created');
 				}
 				var grouped = this.groupBy(function(r) {
 					ts = r.get('timestamp');
-					chooser = App.thorough || beginning && beginning >= new Date(ts) ? dformat : mformat;
+					chooser = App.thorough && (!cutoff || cutoff > new Date(ts)) || beginning && beginning >= new Date(ts) ? dformat : mformat;
 					return chooser(ts);
 				});
 				_.each(grouped, function(list) {
