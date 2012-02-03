@@ -114,6 +114,7 @@ define(["jquery",
 				error: function(model, res, options) {
 					App.error('Some data could no be retrieved.');
 					console.error(arguments);
+					App.resume(true);
 				},
 				success: function(model, res) {
 					App.setItem(key, res);
@@ -155,6 +156,7 @@ define(["jquery",
 				error: function(model, res, options) {
 					App.error('Some data could no be retrieved.');
 					console.error(arguments);
+					App.resume(true);
 				},
 				success: function(col, res) {
 					App.setItem(key, res);
@@ -645,14 +647,14 @@ define(["jquery",
 				return _.include(this.todos, 'authors'); // not enough yet, still locating
 			}
 			return {
-				"having a location" : this.has('location'),
-				"having a date" : this.has('start'),
-				"article being created after date" : this.has('start') && (!this.has("created") || dformat(this.get('created')) >= dformat(this.get('start') - CREATED_TOLERANCE)),
-				"date not older than 2002" : this.has('start') && this.get('start').getFullYear() > 2001,
+				"needs location" : this.has('location'),
+				"needs date" : this.has('start'),
+				"created after date" : this.has('start') && (!this.has("created") || dformat(this.get('created')) >= dformat(this.get('start') - CREATED_TOLERANCE)),
+				"created after 2001" : this.has('start') && this.get('start').getFullYear() > 2001,
 				// potential for a lot of fine tuning
-				"blacklisted category" : checkCategories(this, ['Living people']),
-				"blacklisted template" : checkTemplates(this, ['governor', 'officeholder']),
-				"at least 25% authors located": checkLocatedAuthors(this)
+				"b/l category" : checkCategories(this, ['Living people']),
+				"b/l template" : checkTemplates(this, ['governor', 'officeholder']),
+				"25% located": checkLocatedAuthors(this)
 			};
 		},
 		relevant: function(reqs) {
@@ -2815,7 +2817,11 @@ define(["jquery",
 			this.$continue.hide();
 			this.$analyze.hide();
 			this.$stop.show();
-			this.group = true;
+			this.resume();
+			return false;
+		},
+		resume: function(recover) {
+			this.group = !recover || App.group;
 			this.skim = Group.skim;
 			this.input.val(Group.title);
 			var todo = Group.filter(function(a) { return !a.has('analyzed'); });
@@ -2828,7 +2834,6 @@ define(["jquery",
 				}
 			}
 			this.analyzeNext(_.invoke(todo, 'get', 'id'));
-			return false;
 		},
 		renderArticle: function() {
 			// TODO implement
