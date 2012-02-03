@@ -74,20 +74,36 @@ define(["jquery",
 		return lr;
 	}
 
-	window.distributionStats = function(values) {
-	   values = values.slice(0);
-	   values.sort(d3.ascending);
+	window.dStats = function(values) {
+		values = values.slice(0);
+		values.sort(d3.ascending);
 
-	   var res = {};
-	   res.n = _.size(values);
-	   res.mean = _.avg(values);
-	   res.median = d3.median(values); 
-	   res.q1 = d3.quantile(values, .25); 
-	   res.q3 = d3.quantile(values, .75); 
-	   res.iqr = res.q3 - res.q1;
-	   res.max = d3.max(values);
-	   res.min = d3.min(values);
-	   return res;
+		var res = {};
+		res.n = _.size(values);
+		res.mean = _.avg(values);
+		res.median = d3.median(values); 
+		res.q1 = d3.quantile(values, .25); 
+		res.q3 = d3.quantile(values, .75); 
+		res.max = d3.max(values);
+		res.min = d3.min(values);
+
+		res.iqr = function(k) {
+			var iqr = (res.q3 - res.q1) * k;
+			return [res.q1 - iqr, res.q3 + iqr];
+		}
+
+		res.outliers = function(k) {
+			var iqr = res.iqr(k);
+			return _.filter(values, function(num) {
+				return num < iqr[0] || num > iqr[1];
+			});
+		}
+
+		res.cleaned = function() {
+			return _.difference(values, res.outliers(2));
+		}
+
+		return res;
 	};	   
 
 	window.Model = Backbone.Model.extend({
@@ -723,7 +739,7 @@ define(["jquery",
 			var locations = _.compact(authors.pluck('location'));
 			if(locations.length) {
 				var dists = _.map(locations, function(l) { return l.get('distance')});
-				var stats = distributionStats(dists);
+				var stats = dStats(dists);
 				res.dist_mean = stats.mean;
 				res.dist_q1 = stats.q1;
 				res.dist_q3 = stats.q3;
@@ -1859,7 +1875,7 @@ define(["jquery",
 			var ratios = _.map(r.later_sig_dist_ratios, function(arr) {
 				return arr[2];
 			});
-			var stats = distributionStats(ratios);
+			var stats = dStats(ratios);
 			return "{0} (mean: {1}, median: {2}, n: {3})".format(stats.mean < 1 ? 'True' : 'False', stats.mean.toFixed(3), stats.median.toFixed(3), stats.n);
 		},
 		h10: function(r) {
@@ -1869,7 +1885,7 @@ define(["jquery",
 			var ratios = _.map(r.later_sig_dist_ratios, function(arr) {
 				return arr[3];
 			});
-			var stats = distributionStats(ratios);
+			var stats = dStats(ratios);
 			return "{0} (mean: {1}, median: {2}, n: {3})".format(stats.mean < 1 ? 'True' : 'False', stats.mean.toFixed(3), stats.median.toFixed(3), stats.n);
 		},
 		render: function() {
@@ -2474,8 +2490,8 @@ define(["jquery",
 				return r.get('date_resolution') > 1 ? "day" : "month";
 			});
 				
-			var avg_month = _.avg(_.invoke(grouped.month, 'get', 'delta'));
-			var avg_day = _.avg(_.invoke(grouped.day, 'get', 'delta'));
+			var avg_month = _.avg(dStats(_.invoke(grouped.month, 'get', 'delta')).cleaned());
+			var avg_day = _.avg(dStats(_.invoke(grouped.day, 'get', 'delta')).cleaned());
 			var text = "{0} ({1} days on average, {2} days on average for monthly resolution)".format(avg_day <= 7 && avg_month <= 30 ? 'True' : 'False', 
 				avg_day ? avg_day.toFixed(1) : "n/a", 
 				avg_month ? avg_month.toFixed(1) : "n/a");
@@ -2483,7 +2499,7 @@ define(["jquery",
 			this.display('Articles were created with a short time.', text);
 			this.column(2);
 			// chart
-			var deltas = _.invoke(results, 'get', 'delta');
+			var deltas = dStats(_.invoke(results, 'get', 'delta')).cleaned();
 			var rows = _.map(_.range(Math.floor(_.max(deltas)) + 1), function(d) { return 0 });
 			_.each(deltas, function(d) {
 				rows[Math.floor(d)]++;
@@ -2502,6 +2518,13 @@ define(["jquery",
 			var rows = _.map(results, function(r) {
 				return [r.get('created'), r.get('delta')];
 			});
+			var iqr = dStats(_.map(rows, function(arr) {
+				return arr[1];
+			})).iqr(1.5);
+			rows = _.filter(rows, function(arr) {
+				return arr[1] >= iqr[0] && arr[1] <= iqr[1];
+			});
+
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 			var lr = linearRegression(rows);
 			var text = "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r < 0 ? "True" : "False", lr.r.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
@@ -2616,7 +2639,7 @@ define(["jquery",
 				var ratios = _.map(res.get('later_sig_dist_ratios'), function(arr) {
 					return arr[2] * 100;
 				});
-				var stats = distributionStats(ratios);
+				var stats = dStats(ratios);
 				return stats.mean;
 			});
 
@@ -2633,7 +2656,7 @@ define(["jquery",
 				var ratios = _.map(res.get('later_sig_dist_ratios'), function(arr) {
 					return arr[3] * 100;
 				});
-				var stats = distributionStats(ratios);
+				var stats = dStats(ratios);
 				return stats.mean;
 			});
 
