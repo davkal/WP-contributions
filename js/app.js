@@ -883,6 +883,7 @@ define(["jquery",
 					if(!_.isUndefined(last_dist) && r.has('sig_dist_survivors')) {
 						list.push([
 							r.get('timestamp'), 
+							1, // baseline
 							last_dist ? r.get('sig_dist_survivors') / last_dist : 1, 
 							last_dist ? r.get('sig_dist_survivors_text') / last_dist : 1
 						]);
@@ -1842,20 +1843,20 @@ define(["jquery",
 				return "n/a (not enough located revisions)."
 			}
 			var ratios = _.map(r.later_sig_dist_ratios, function(arr) {
-				return arr[1];
+				return arr[2];
 			});
 			var stats = distributionStats(ratios);
-			return "{0} (sd / e.surv, mean: {1}, median: {2}, n: {3})".format(stats.mean < 1 ? 'True' : 'False', stats.mean.toFixed(3), stats.median.toFixed(3), stats.n);
+			return "{0} (mean: {1}, median: {2}, n: {3})".format(stats.mean < 1 ? 'True' : 'False', stats.mean.toFixed(3), stats.median.toFixed(3), stats.n);
 		},
 		h10: function(r) {
 			if(!r.h10) {
 				return "n/a (not enough located revisions)."
 			}
 			var ratios = _.map(r.later_sig_dist_ratios, function(arr) {
-				return arr[2];
+				return arr[3];
 			});
 			var stats = distributionStats(ratios);
-			return "{0} (sd / t.surv, mean: {1}, median: {2}, n: {3})".format(stats.mean < 1 ? 'True' : 'False', stats.mean.toFixed(3), stats.median.toFixed(3), stats.n);
+			return "{0} (mean: {1}, median: {2}, n: {3})".format(stats.mean < 1 ? 'True' : 'False', stats.mean.toFixed(3), stats.median.toFixed(3), stats.n);
 		},
 		render: function() {
 			var r = Article.get('results');
@@ -1874,8 +1875,8 @@ define(["jquery",
 			this.display('H6. Most of early contributors were local', this.h6(r));
 			this.display('H7. Share of anonymous contributions decreaes over time', this.h7(r));
 			this.display('H8. Share of local contributions decreaes over time', this.h8(r));
-			this.display('H9. Local contributions are more likely to survive', this.h9(r));
-			this.display('H10. Text from local contributions is more likely to survive', this.h10(r));
+			this.display('H9. Local contributions are more likely to survive (e.surv ratio)', this.h9(r));
+			this.display('H10. Text from local contributions is more likely to survive (t.surv ratio)', this.h10(r));
 
 			this.column(2);
 			var cols, chart;
@@ -1905,6 +1906,7 @@ define(["jquery",
 				chart = this.subview(GoogleChartView);
 				cols = [
 					{label: 'Date', type: 'date'},
+					{label: 'Baseline', type: 'number'},
 					{label: 'e.surv ratio', type: 'number'},
 					{label: 't.surv ratio', type: 'number'}
 				];
