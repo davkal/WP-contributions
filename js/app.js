@@ -1834,14 +1834,14 @@ define(["jquery",
 				return "n/a (not enough revisions)."
 			}
 			var lr = linearRegression(r.later_anon_vs_reg);
-			return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r < 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
+			return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r < 0 ? "True" : "False", lr.r.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
 		},
 		h8: function(r) {
 			if(!r.h7) {
 				return "n/a (not enough revisions)."
 			}
 			var lr = linearRegression(r.later_local_vs_dist);
-			return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r < 0 ? "True" : "False", lr.r2.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
+			return "{0} (R: {1}, slope: {2}, t: {3}, df: {4})".format(lr.r < 0 ? "True" : "False", lr.r.toFixed(2), lr.slope.toFixed(2), lr.t.toFixed(3), lr.df);
 		},
 		h9: function(r) {
 			if(!r.h9) {
