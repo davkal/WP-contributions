@@ -2141,9 +2141,8 @@ define(["jquery",
 	});
 
 	window.LocalnessView = GoogleChartView.extend({
-		title: "Activity",
-		id: 'localness',
-		subtitle: "Distances vs. page views",
+		title: "Localness",
+		subtitle: "Signature distance: average author distance weighted by edit count or text survival",
 		render: function() {
 			var revisions = Article.get('revisions').has('sig_dist');
 			if(_.size(revisions)) {
@@ -2157,7 +2156,6 @@ define(["jquery",
 					{label: 'Sd survived text(km)', type: 'number'}
 				];
 
-				// TODO annotations: day 3, anon <> regs, locals <> distant
 				var rows = _.map(revisions, function(rev, index) {
 					return [
 						rev.get('timestamp'),
