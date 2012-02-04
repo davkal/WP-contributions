@@ -17,7 +17,7 @@ define(["jquery",
 	], function($, dateFormat, _, Backbone, lz77, DateParser, CoordsParser, countries, botlist, PMCU) {
 
 	window.CACHE_LIMIT = 50 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
-	window.GROUP_DELAY = 5 * 1000; // (ms) time before analyzing next article
+	window.GROUP_DELAY = 3 * 1000; // (ms) time before analyzing next article
 	window.GROUP_KEY = "articleGroup";
 	window.RE_PARENTHESES = /\([^\)]*\)/g;
 	window.RE_SQUARE = /\[[^\]]*\]/g;
@@ -1174,6 +1174,7 @@ define(["jquery",
 		},
 		locateUsers: function() {
 			var authorship = Article.get('authors');
+			var creator = Article.get('first_edit').user;
 			var next = this.find(function(a) {
 				if(a.has('located')) {
 					return false;
@@ -1195,13 +1196,9 @@ define(["jquery",
 					loc.bind('loaded', this.locateUsers, this);
 					App.status('IP lookup for {0}...'.format(next.id));
 					_.debounce(_.bind(loc.retrieve, loc), 500)();
-				} else if(App.thorough || !this.creator_page) {
+				} else if(App.thorough || next.id == creator) { // only first user
 					// try userpages
 					var userPage = new UserPage({title: next.get('urlencoded'), id: next.id});
-					if(!App.thorough) {
-						// only first user
-						this.creator_page = userPage;
-					}
 					userPage.bind('loaded', this.locateUsers, this);
 					userPage.bind('change:country', function(page) {
 						next.set({userpage: true});
@@ -1254,6 +1251,7 @@ define(["jquery",
 			var bots = Article.get('bots');
 			var articleLoc = Article.get('location');
 			_.each(res.editors, function(obj, name) {
+				name = _.unescape(name);
 				if(bot = bots.get(name)) {
 					bot.set({
 						count: obj.all,
@@ -1488,7 +1486,8 @@ define(["jquery",
 			var page = _.first(_.values(pages));
 			_.each(page.revisions, function(rev) {
 				rev.id = rev.revid;
-				rev.user = _.escape(rev.user);
+				//console.log(rev.user, _.escape(rev.user), _.unescape(rev.user));
+				rev.user = _.unescape(rev.user);
 				delete rev.comment;
 			});
 			if(this.continue && res['query-continue']) {

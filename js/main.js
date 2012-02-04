@@ -60,6 +60,14 @@ require(["jquery",
 					return memo + num;
 				}, 0);
 			},
+			unescape: function(text) {
+				var replaced = 0;
+				while(text.match(/&.*;/) && replaced < 5) {
+					text = $('<div/>').html(text).text();
+					replaced++; // safeguard
+				}
+				return text;
+			},
 			extract: function(obj, list) {
 				var ret = {};
 				_.each(obj, function(val, key) {
