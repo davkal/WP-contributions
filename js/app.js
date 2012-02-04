@@ -565,7 +565,6 @@ define(["jquery",
 		initialize: function() {
 			var authors = new Authorship;
 			var revisions = new RevisionCollection;
-			var locations = new LocationCollection;
 			var languages = new LanguageCollection;
 			//var traffic = new PageViews;
 			var current = new Revision;
@@ -621,7 +620,6 @@ define(["jquery",
 			this.set({
 				authors: authors,
 				revisions: revisions,
-				locations: locations,
 				languages: languages,
 				// traffic: traffic,
 				current: current,
@@ -929,7 +927,7 @@ define(["jquery",
 		parse: function(res) {
 			var attr = {};
 			if(res.parse) {
-				var countries = [], candidate;
+				var countries = [], candidate, country;
 				// TODO use MainArticle's candidate mechanism
 				// TRY load first revisions and check anon comments for "IP"  (e.g. User:TimBentley)
 				// TRY check first revision texts, usually more infoboxes present
@@ -971,11 +969,12 @@ define(["jquery",
 							});
 						}
 					});
-
-					if(country) {
-						//console.log(this.get('title'), pattern, country);
-						attr.country = country;
-					}
+				}
+				if(country) {
+					//console.log(this.get('title'), pattern, country);
+					attr.country = country;
+				} else {
+					Unlocatable.add(this);
 				}
 			}
 			App.status();
@@ -1128,6 +1127,14 @@ define(["jquery",
 
 	window.Authorship = Collection.extend({
 		model: Author,
+		location: function(user) {
+			var author, loc;
+			if(author = this.get(user)) {
+				if(loc = author.get('location')) {
+					return loc;
+				}
+			}
+		},
 		signatureDistance: function(authors, counter) {
 			var sd = 0, loc, dist, count;
 			var allCount = 0;
@@ -1149,8 +1156,8 @@ define(["jquery",
 		addLocation: function(loc) {
 			var author = this.get(loc.id);
 			if(author) {
+				Locations.add(loc.clone());
 				var dist = loc.calcDistance(Article.get('location'));
-				Article.get('locations').add(loc);
 				author.set({location: loc, located: true});
 			} else {
 				console.error("Author not found authorship.", loc.id);
@@ -1160,14 +1167,23 @@ define(["jquery",
 			country = Countries.get(country);
 			if(country) {
 				var location = country.clone();
+				// override country name with author id
 				location.set({id: author.id});
 				this.addLocation(location);
 			}
 		},
 		locateUsers: function() {
-			var locations = Article.get('locations');
+			var authorship = Article.get('authors');
 			var next = this.find(function(a) {
-				return !a.has('located') && !locations.get(a.id);
+				if(a.has('located')) {
+					return false;
+				}
+				if(Unlocatable.get(a.id)) {
+					console.log("Recall unlocateable", a.id);
+					a.set({located: false});
+					return false;
+				}
+				return !authorship.location(a.id);
 			});
 			if(next) {
 				next.set({located: false});
@@ -1181,7 +1197,7 @@ define(["jquery",
 					_.debounce(_.bind(loc.retrieve, loc), 500)();
 				} else if(App.thorough || !this.creator_page) {
 					// try userpages
-					var userPage = new UserPage({title: next.get('urlencoded'), author: next});
+					var userPage = new UserPage({title: next.get('urlencoded'), id: next.id});
 					if(!App.thorough) {
 						// only first user
 						this.creator_page = userPage;
@@ -1217,22 +1233,16 @@ define(["jquery",
 
 			// parsing locations
 			var user, loc, dist;
-			var articleLoc = Article.get('location');
-			var locations = Article.get('locations');
 			_.each(res.anons, function(arr, ts) {
 				if(arr && arr.length == 4) {
 					user = arr[0];
-					if(!locations.get(user)) {
-						locations.add({
+					if(!Locations.get(user)) {
+						Locations.add({
 							id: user,
 							region: Countries.countrify(arr[1]),
 							latitude: arr[2],
 							longitude: arr[3]
 						});
-					}
-					loc = locations.get(user);
-					if(articleLoc && !loc.has('distance')) {
-						loc.calcDistance(articleLoc);
 					}
 				} else {
 					console.log("Unknown location", arr);
@@ -1242,6 +1252,7 @@ define(["jquery",
 			// adding all editors
 			var editors = [], author, bot, ip;
 			var bots = Article.get('bots');
+			var articleLoc = Article.get('location');
 			_.each(res.editors, function(obj, name) {
 				if(bot = bots.get(name)) {
 					bot.set({
@@ -1258,7 +1269,11 @@ define(["jquery",
 						count: obj.all,
 						minor: obj.minor
 					});
-					if(loc = locations.get(name)) {
+					if(loc = Locations.get(name)) {
+						loc = loc.clone();
+						if(articleLoc) {
+							loc.calcDistance(articleLoc);
+						}
 						author.set({location: loc});
 					}
 					editors.push(author)
@@ -1429,13 +1444,13 @@ define(["jquery",
 				if(!this.subcats.length) {
 					delete this.subcats;
 				}
-				App.status("Next sub-category: ({0})".format(this.current));
+				App.status("Sub-category: {0}".format(this.current));
 				_.defer(_.bind(this.retrieve, this));
 			} else if(++this.catIndex < this.cats.length) {
 				// next main category
 				this.offset = "";
 				this.current = this.cats[this.catIndex];
-				App.status("Next category: ({0})".format(this.current));
+				App.status("Category: {0}".format(this.current));
 				_.defer(_.bind(this.retrieve, this));
 			} else {
 				delete this.offset;
@@ -1504,11 +1519,11 @@ define(["jquery",
 		calcSignatureDistance: function(caller) {
 			// for all revisions
 			if(Article.has('location')) {
+				var authorship = Article.get('authors');
 				var located = this.located(), sd, dist;
-				var locations = Article.get('locations');
 				// incremental signature distance
 				var localness = _.memoize(function(i, list) {
-					dist = locations.get(list[i].get('user')).get('distance');
+					dist = authorship.location(list[i].get('user')).get('distance');
 					if(i == 0) {
 						return dist;
 					}
@@ -2021,9 +2036,8 @@ define(["jquery",
 			}
 		},
 		render: function() {
-			var locations = Article.get('locations');
 			var authors = Article.get('authors');
-			if(_.size(locations) && _.size(authors)) {
+			if(_.size(authors) && _.size(authors.has('location'))) {
 				this.row(['span-two-thirds', 'span-one-third']);
 				var located = authors.filter(function(author) {
 					return author.has('location');
@@ -2053,7 +2067,6 @@ define(["jquery",
 		render: function() {
 			var m = Article.get('current');
 			if(m && m.has('revisions')) {
-				var locations = Article.get('locations');
 				this.subtitle = "Geographic origin of survived text in revision {0} by {1} - {2}".format(m.id, m.get('user'), dtformat(m.get('timestamp')));
 				this.row(['span-two-thirds', 'span-one-third']);
 				// counting all surviving revisions
@@ -2061,7 +2074,7 @@ define(["jquery",
 				var counter = m.get('counter');
 				var located = [];
 				_.each(revisions, function(r) {
-					if(loc = locations.get(r.get('user'))) {
+					if(loc = Locations.get(r.get('user'))) {
 						located.push([loc.get('region'), counter[r.id]]);
 					}
 				});
@@ -2283,9 +2296,8 @@ define(["jquery",
 				// initialize countries and edits
 				var edits = {}; // country -> cuml. edits
 				var dists = {}; // country -> [dist1, dist2, ...]
-				var locations = Article.get('locations');
 				_.each(revisions, function(rev) {
-					loc = locations.get(rev.get('user')).get('region');
+					loc = Locations.get(rev.get('user')).get('region');
 					edits[loc] = 0;
 					dists[loc] = [];
 				});
@@ -2302,7 +2314,7 @@ define(["jquery",
 					var characters = _.clone(edits);
 					var editCount = _.clone(edits); 
 					_.each(revs, function(r) {
-						if(loc = locations.get(r.get('user'))) {
+						if(loc = Locations.get(r.get('user'))) {
 							country = loc.get('region');
 							characters[country] += counter[r.id];
 							editCount[country]++;
@@ -2321,13 +2333,15 @@ define(["jquery",
 				});
 				var text = {};
 				var revCount = {};
+				var authorship = Article.get('authors');
 				_.each(dated, function(revs, d) {
 					// aggregate edits for each date
 					_.each(revs, function(rev) {
-						loc = locations.get(rev.get('user'));
-						country = loc.get('region');
-						edits[country]++;
-						dists[country].push(loc.get('distance'));
+						if(loc = authorship.location(rev.get('user'))) {
+							country = loc.get('region');
+							edits[country]++;
+							dists[country].push(loc.get('distance'));
+						}
 					});
 					// current survival rev
 					text = survivalText[d] || text;
@@ -2720,7 +2734,6 @@ define(["jquery",
 
 // TODOS
 	
-// TODO make Locations global for re-use (user pages)
 // TODO timeline with dots for articles in group
 // TODO mention that the English Wikipedia is searched
 
@@ -2766,6 +2779,9 @@ define(["jquery",
 			this.initAutocomplete();
 			this.checkCacheForGroup();
 			this.status(window.google ? null : "Missing JS libraries.");
+
+			window.Locations = new LocationCollection;
+			window.Unlocatable = new Backbone.Collection;
 		},
 		download: function() {
 			window.open('data:text/json;charset=utf-8,' + JSON.stringify(Group));
