@@ -658,7 +658,7 @@ define(["jquery",
 				if(authors.length == 0 || authors.has('location').length / authors.length >= 0.25) {
 					return true;
 				}
-				return _.include(this.todos, 'authors'); // not enough yet, still locating
+				return _.include(Article.todos, 'authors'); // not enough yet, still locating
 			}
 			return {
 				"needs location" : this.has('location'),
