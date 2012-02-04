@@ -795,7 +795,7 @@ define(["jquery",
 			res.located_text = _.sum(_.map(located, function(r) {
 				return counter[r.id];
 			}));
-			res.located_text_ratio = res.located_text / revision.get('length');
+			res.located_text_ratio = revision.get('length') ? res.located_text / revision.get('length') : 0;
 
 			// H5 / H6 early stats
 			res.h5 = res.h6 = res.date_resolution > 0 && _.size(gr.early);
@@ -1760,7 +1760,7 @@ define(["jquery",
 					return name;
 				});
 				var all = this.model.size();
-				var ratio = located / all * 100;
+				var ratio = all ? located / all * 100 : 0;
 				var label = "Contributors ({0}, {1}% located)".format(all, ratio.toFixed(1));
 				if(!this.field) {
 					this.field = this.textarea(label, "", 6);
@@ -1783,7 +1783,7 @@ define(["jquery",
 				var located_userpages = _.size(this.model.has('userpage'));
 				var located_baseline = located - located_pmcu - located_userpages;
 				function ratio(l) {
-					return "{0}%".format((l / all * 100).toFixed(1));
+					return "{0}%".format((all ? l / all * 100 : 0).toFixed(1));
 				}
 				if(!this.field) {
 					this.field = this.display("Contributors located by", "");
@@ -1917,8 +1917,8 @@ define(["jquery",
 			this.display('H4. Creator was local', this.h4(r));
 			this.display('H5. Most of early contributors were anonymous', this.h5(r));
 			this.display('H6. Most of early contributors were local', this.h6(r));
-			this.display('H7. Share of anonymous contributions decreaes over time', this.h7(r));
-			this.display('H8. Share of local contributions decreaes over time', this.h8(r));
+			this.display('H7. Share of anonymous contributions decreases over time', this.h7(r));
+			this.display('H8. Share of local contributions decreases over time', this.h8(r));
 			this.display('H9. Local contributions are more likely to survive (e.surv ratio)', this.h9(r));
 			this.display('H10. Text from local contributions is more likely to survive (t.surv ratio)', this.h10(r));
 
@@ -2089,7 +2089,7 @@ define(["jquery",
 				var total = _.sum(geoCount, function(c){return c[1]});
 				var length = m.get('length');
 				function ratio(l) {
-					return "{0}%".format((l / length * 100).toFixed(2));
+					return "{0}%".format((length ? l / length * 100 : 0).toFixed(2));
 				}
 				var ratios = _.map(geoCount, function(arr) {
 					return "{0}, {1}".format(arr[0], ratio(arr[1]));
@@ -2321,7 +2321,7 @@ define(["jquery",
 					});
 					// relative values to article length
 					_.each(characters, function(num, country) {
-						characters[country] = num / length * 100;
+						characters[country] = length ? num / length * 100 : 0;
 					});
 					survivalText[date] = characters;
 					survivalEdits[date] = editCount;
@@ -2414,7 +2414,8 @@ define(["jquery",
 				this.link("Article group {0}".format(index ? index + 1 : ""), title, "http://{0}.wikipedia.org/wiki/{1}".format('en', title));
 			}, this);
 			var total = _.size(analyzed);
-			this.display("Progress", "{0} of {1} articles analyzed ({2}%)".format(total, g.size(), (total * 100 / g.size()).toFixed(1)));
+			var all = g.size();
+			this.display("Progress", "{0} of {1} articles analyzed ({2}%)".format(total, g.size(), (all ? total * 100 / all : 0).toFixed(1)));
 			if(total > 0) {
 				var relevant = _.filter(analyzed, function(a) {
 					return a.get('analyzed');
@@ -2458,7 +2459,7 @@ define(["jquery",
 					config = {
 						isStacked: true, 
 						legend: {position: 'none'},
-						title: 'Articles qualified: {0} ({1}% of all)'.format(count, (count * 100 / g.size()).toFixed(1))
+						title: 'Articles qualified: {0} ({1}% of all)'.format(count, (all ? count * 100 / all : 0).toFixed(1))
 					};
 					chart.renderTable('ColumnChart', cols, rows, config);
 				} else {
@@ -2554,7 +2555,7 @@ define(["jquery",
 		h3: function(results, title, subtitle, total) {
 			var langs = _.invoke(results, 'get', 'first_lang');
 			var english = _.filter(langs, function(l) {return l == 'en'});
-			var ratio = english.length / langs.length;
+			var ratio = langs.length ? english.length / langs.length : 0;
 			var text =  "{0} ({1}%)".format(ratio > 0.5 ? 'True' : 'False', Math.round(ratio * 100));
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 			this.display('Articles were created in the English Wikipedia first', text);
@@ -2578,7 +2579,7 @@ define(["jquery",
 			var residents = _.filter(results, function(r) {
 				return r.get('creator_citizen');
 			});
-			var ratio = residents.length / results.length;
+			var ratio = results.length ? residents.length / results.length : 0;
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 			var text =  "{0} ({1}% of articles with located creator)".format(ratio > 0.5 ? 'True' : 'False', Math.round(ratio * 100));
 			this.display("Articles were created by a resident", text);
@@ -2597,7 +2598,7 @@ define(["jquery",
 		},
 		h5: function(results, title, subtitle, total) {
 			var values = _.map(results, function(e) {
-				return e.get('early_anon_count') / e.get('early_author_count');
+				return e.get('early_author_count') ? e.get('early_anon_count') / e.get('early_author_count') : 0;
 			});
 
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
@@ -2610,7 +2611,7 @@ define(["jquery",
 		},
 		h6: function(results, title, subtitle) {
 			var values = _.map(results, function(e) {
-				return e.get('early_local_count') / e.get('early_located_count');
+				return e.get('early_located_count') ? e.get('early_local_count') / e.get('early_located_count') : 0;
 			});
 
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
