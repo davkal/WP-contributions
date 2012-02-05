@@ -133,7 +133,7 @@ define(["jquery",
 					App.resume(true);
 				},
 				success: function(model, res) {
-					App.setItem(key, res);
+					//App.setItem(key, res);
 					me.trigger(me.loaded || 'loaded', me);
 				}
 			});
@@ -175,7 +175,7 @@ define(["jquery",
 					App.resume(true);
 				},
 				success: function(col, res) {
-					App.setItem(key, res);
+					//App.setItem(key, res);
 					if(_.isUndefined(me.offset)) {
 						me.trigger(me.loaded || 'loaded', me);
 					}
@@ -567,7 +567,6 @@ define(["jquery",
 			var revisions = new RevisionCollection;
 			var languages = new LanguageCollection;
 			//var traffic = new PageViews;
-			var current = new Revision;
 			var bots = new Authorship(_.map(botlist.list, function(b){return {id: b};}));
 
 			this.bind('change:input', this.retrieve, this); 
@@ -597,7 +596,6 @@ define(["jquery",
 
 			// parallel fetching of languages, users and page views
 			revisions.bind('done', revisions.calcSignatureDistance, revisions);
-			revisions.bind('done', revisions.current, revisions);
 			revisions.bind('done', languages.fetchNext, languages);
 			if(!this.get('group')) {
 				// revisions.bind('done', traffic.retrieve, traffic);
@@ -608,21 +606,23 @@ define(["jquery",
 
 			authors.bind('done', function(){
 				revisions.calcSignatureDistanceSurvivors();
+				var current = revisions.current();
+				current.bind('loaded', function() {
+					// trigger to load authors for all remaining revisions
+					revisions.fetchAuthors();
+					Article.trigger('current');
+				});
+				current.retrieve();
 				this.done('authors');
 			}, this);
 			revisions.bind('distancedone', function(){this.done('revisiondistances')}, this);
 			revisions.bind('authorsdone', function(){this.done('revisionauthors')}, this);
-
-			current.bind('change:id', current.retrieve, current);
-			// trigger to load authors for all remaining revisions
-			current.bind('loaded', revisions.fetchAuthors, revisions);
 
 			this.set({
 				authors: authors,
 				revisions: revisions,
 				languages: languages,
 				// traffic: traffic,
-				current: current,
 				bots: bots
 			});
 		},
@@ -1591,9 +1591,8 @@ define(["jquery",
 		},
 		current: function(id) {
 			var rev = id && this.get(parseInt(id)) || this.last();
-			var current = Article.get('current');
-			current.set(rev.toJSON());
-			return current;
+			Article.set({current: rev});
+			return rev;
 		}
 	});
 
@@ -2966,7 +2965,6 @@ define(["jquery",
 
 			if(!this.group && google.visualization) { // goole stuff sometimes fails to load
 				var revisions = Article.get('revisions');
-				var current = Article.get('current');
 				// var traffic = Article.get('traffic');
 
 				var mv = new MapView();
@@ -2975,6 +2973,8 @@ define(["jquery",
 				var tv = new SurvivalMotionView();
 
 				Article.bind('change:sig_dist', mv.render, mv);
+				Article.bind('change:sig_dist', mv.render, mv);
+				Article.bind('current', sv.render, sv);
 				Article.bind('complete', function() {
 					this.$stop.hide();
 					this.$clear.show();
@@ -2982,15 +2982,13 @@ define(["jquery",
 
 				authors.bind('loaded', mv.render, mv);
 				authors.bind('done', mv.render, mv);
-				authors.bind('done', sv.render, sv);
+				//authors.bind('done', sv.render, sv);
 				authors.bind('done', tv.render, tv);
 				authors.bind('done', dv.render, dv);
 
 				revisions.bind('distance', dv.render, dv);
 				revisions.bind('authorsdone', dv.render, dv);
 				revisions.bind('authorsdone', tv.render, tv);
-
-				current.bind('change:authors', sv.render, sv);
 
 				// traffic.bind('loaded', dv.render, dv);
 			}
