@@ -62,7 +62,7 @@ require(["jquery",
 			},
 			unescape: function(text) {
 				var replaced = 0;
-				while(text.match(/&.*;/) && replaced < 5) {
+				while(text && text.match(/&.*;/) && replaced < 5) {
 					text = $('<div/>').html(text).text();
 					replaced++; // safeguard
 				}
