@@ -17,7 +17,7 @@ define(["jquery",
 	], function($, dateFormat, _, Backbone, lz77, DateParser, CoordsParser, countries, botlist, PMCU) {
 
 	window.CACHE_LIMIT = 50 * 1000; // (bytes, approx.) keep low, big pages are worth the transfer
-	window.GROUP_DELAY = 3 * 1000; // (ms) time before analyzing next article
+	window.GROUP_DELAY = 2 * 1000; // (ms) time before analyzing next article
 	window.GROUP_KEY = "articleGroup";
 	window.RE_PARENTHESES = /\([^\)]*\)/g;
 	window.RE_SQUARE = /\[[^\]]*\]/g;
@@ -40,6 +40,10 @@ define(["jquery",
 	}
 	function mformat(d) {
 		return $.format.date(new Date(d), "yyyy-MM");
+	}
+	function wformat(d) {
+		d = new Date(d);
+		return $.format.date(d, "yyyy-MM") + Math.floor(d.getDate() / 7);
 	}
 
 	// Based on http://trentrichardson.com/2010/04/06/compute-linear-regressions-in-javascript/
@@ -87,6 +91,17 @@ define(["jquery",
 		res.max = d3.max(values);
 		res.min = d3.min(values);
 
+		res.variance = 0;
+		res.stddev = 0;
+
+		if(values.length > 1) {
+			var diffs = _.map(values, function(v) {
+				return Math.pow(v - res.mean, 2);
+			});
+			res.variance = _.sum(diffs) / res.n;
+			res.stddev = Math.abs(Math.sqrt(res.variance));
+		}
+
 		res.iqr = function(k) {
 			var iqr = (res.q3 - res.q1) * k;
 			return [res.q1 - iqr, res.q3 + iqr];
@@ -100,7 +115,7 @@ define(["jquery",
 		}
 
 		res.cleaned = function() {
-			return _.difference(values, res.outliers(2));
+			return _.difference(values, res.outliers(1.5));
 		}
 
 		return res;
@@ -595,7 +610,19 @@ define(["jquery",
 			}, this);
 
 			// parallel fetching of languages, users and page views
-			revisions.bind('done', revisions.calcSignatureDistance, revisions);
+			revisions.bind('done', function() {
+				revisions.calcSignatureDistance();
+				languages.fetchNext();
+				var current = revisions.current();
+				if(current) {
+					current.bind('loaded', function() {
+						// trigger to load authors for all remaining revisions
+						revisions.fetchAuthors();
+						Article.trigger('current');
+					});
+					current.retrieve();
+				}
+			});
 			revisions.bind('done', languages.fetchNext, languages);
 			if(!this.get('group')) {
 				// revisions.bind('done', traffic.retrieve, traffic);
@@ -606,13 +633,6 @@ define(["jquery",
 
 			authors.bind('done', function(){
 				revisions.calcSignatureDistanceSurvivors();
-				var current = revisions.current();
-				current.bind('loaded', function() {
-					// trigger to load authors for all remaining revisions
-					revisions.fetchAuthors();
-					Article.trigger('current');
-				});
-				current.retrieve();
 				this.done('authors');
 			}, this);
 			revisions.bind('distancedone', function(){this.done('revisiondistances')}, this);
@@ -716,9 +736,18 @@ define(["jquery",
 			var grouped, location, author, revision, username, list, count, limit, date;
 			revision = revisions.at(0);
 			res.created = new Date(revision.get('timestamp'));
+			res.age = new Date() - res.created;
 			res.start = this.get('start');
 			res.end = this.get('end');
 			res.date_resolution = this.get('date_resolution');
+			res.revisions = revisions.size();
+			res.authors = authors.size();
+			res.length = this.get('length');
+			res.anonymous = _.size(authors.filter(function(a) { return a.get('ip');}));
+			if(location = this.get('location')) {
+				res.latitude = location.get('latitude');
+				res.longitude = location.get('longitude');
+			}
 
 			// make start,end an open interval
 			res.end.setDate(res.end.getDate() + 1);
@@ -752,6 +781,11 @@ define(["jquery",
 				count = _.size(authors.has('userpage'));
 				res.located_user_pages = count;
 				res.located_user_pages_ratio = count / authors.length;
+
+				res.sig_dist = this.get('sig_dist');
+				res.countries = _.size(_.uniq(_.map(locations, function(l) { 
+					return l.get('region');
+				})));
 			} else {
 				console.log("No author locations.", title);
 			}
@@ -796,6 +830,18 @@ define(["jquery",
 				return counter[r.id];
 			}));
 			res.located_text_ratio = revision.get('length') ? res.located_text / revision.get('length') : 0;
+			res.sig_dist_survivors = revision.get('sig_dist_survivors');
+			res.sig_dist_survivors_text = revision.get('sig_dist_survivors_text');
+			res.esurv_index = (res.sig_dist && !_.isUndefined(res.sig_dist_survivors) ? 
+				res.sig_dist_survivors / res.sig_dist : 1) * 100;
+			res.tsurv_index = (res.sig_dist && !_.isUndefined(res.sig_dist_survivors_text) ? 
+				res.sig_dist_survivors_text / res.sig_dist : 1) * 100;
+			var survived_countries = _.map(located, function(r) {
+				if(location = Locations.get(r.get('user'))) {
+					return location.get('region');
+				}
+			});
+			res.countries_survived = _.size(_.uniq(survived_countries));
 
 			// H5 / H6 early stats
 			res.h5 = res.h6 = res.date_resolution > 0 && _.size(gr.early);
@@ -835,14 +881,14 @@ define(["jquery",
 			}
 
 			// H7 / H8 later stats
-			res.h7 = res.h8 = res.date_resolution > 0 && _.size(gr.later) >= 10;
+			grouped = _.groupBy(gr.later, function(r) {
+				return mformat(r.get('timestamp'));
+			});
+
+			res.h7 = res.h8 = res.date_resolution > 0 && _.size(grouped) >= 6;
 			if(res.h7) {
 				var subgrouped, part, ratio;
 				// bucket by month
-				grouped = _.groupBy(gr.later, function(r) {
-					return mformat(r.get('timestamp'));
-				});
-
 				// H7 get anons for each bucket
 				list = [];
 				_.each(grouped, function(arr, ts) {
@@ -891,7 +937,7 @@ define(["jquery",
 			// H9 and H10, local contribs prevail and local text is likely to stick
 			if(gr.later) {
 				list = [];
-				var last_dist, esurv, tsurv;
+				var last_dist, esurv, tsurv, ratios = [];
 				_.each(gr.later, function(r) {
 					if(r.has('sig_dist')) {
 						last_dist = r.get('sig_dist');
@@ -901,13 +947,20 @@ define(["jquery",
 						tsurv = r.get('sig_dist_survivors_text');
 						list.push([
 							r.get('timestamp'),
-							1, // baseline
-							last_dist && !_.isUndefined(esurv) ? esurv / last_dist : 1,
-							last_dist && !_.isUndefined(tsurv) ? tsurv / last_dist : 1
+							last_dist,
+							esurv,
+							tsurv
+						]);
+						ratios.push([
+							r.get('timestamp'),
+							100, // baseline
+							(last_dist && !_.isUndefined(esurv) ? esurv / last_dist : 1) * 100,
+							(last_dist && !_.isUndefined(tsurv) ? tsurv / last_dist : 1) * 100
 						]);
 					}
 				});
-				res.later_sig_dist_ratios = list;
+				res.later_sig_dist_ratios = ratios;
+				res.later_sig_dists = list;
 			}
 			res.h9 = res.h10 = res.later_sig_dist_ratios && res.later_sig_dist_ratios.length >= 10;
 
@@ -1365,11 +1418,6 @@ define(["jquery",
 		}
 	});
 
-	// Template:Infobox_civil_conflict
-	// Template:Infobox_historical_event
-	// Category:Political_riots
-	// Category:2011_riots
-
 	// Too many irrelevant articles: 
 	// Template:Infobox_military_conflict
 
@@ -1380,22 +1428,23 @@ define(["jquery",
 			this.title = title;
 			this.cats = title.split("|");
 			this.catIndex = 0;
-			var prefix = title.split(':')[0];
+			this.current = this.cats[this.catIndex];
+			this.adjust();
+			App.status("Getting article list...");
+			this.retrieve();
+		},
+		adjust: function() {
+			var prefix = this.current.split(':')[0];
 			if(prefix != 'Template' && prefix != 'Category') {
 				App.error('Not a valid template or category.');
 				return;
 			}
 			var isTemplate = prefix == 'Template';
-
 			this.listkey = isTemplate ? "embeddedin" : "categorymembers";
 			this.titlekey = isTemplate ? "eititle" : "cmtitle";
 			this.limitkey = isTemplate ? "eilimit" : "cmlimit";
 			this.namespace = isTemplate ? "einamespace" : "cmnamespace";
 			this.ns = isTemplate || this.lists ? 0 : "0|14";
-			this.current = this.cats[this.catIndex];
-
-			App.status("Getting article list...");
-			this.retrieve();
 		},
 		url: function() {
 			var offset = this.offset || "";
@@ -1448,6 +1497,7 @@ define(["jquery",
 				// next main category
 				this.offset = "";
 				this.current = this.cats[this.catIndex];
+				this.adjust();
 				App.status("Category: {0}".format(this.current));
 				_.defer(_.bind(this.retrieve, this));
 			} else {
@@ -1555,12 +1605,14 @@ define(["jquery",
 						cutoff = new Date(end);
 						cutoff.setMonth(cutoff.getMonth() + 3);
 					}
-				} else {
-					cutoff = Article.get('created');
 				}
+				var size = this.size();
 				var grouped = this.groupBy(function(r) {
 					ts = r.get('timestamp');
-					chooser = App.thorough && (!cutoff || cutoff > new Date(ts)) || beginning && beginning >= new Date(ts) ? dformat : mformat;
+					chooser = App.thorough && (!cutoff || cutoff > new Date(ts)) ? wformat : mformat;
+				   	if(App.thorough && beginning && beginning >= new Date(ts)) {
+					   chooser = dformat;
+					}
 					return chooser(ts);
 				});
 				_.each(grouped, function(list) {
@@ -1573,7 +1625,7 @@ define(["jquery",
 				// select only sample if population is too big
 				return !r.has('authors') && r.get('selected');
 			});
-			if(rev) {
+			if(rev && this.sampled >= 10) {
 				var me = this;
 				var count = this.sampled || this.length;
 				rev.set({authors: false}); // marking as ready for analysis
@@ -1591,8 +1643,10 @@ define(["jquery",
 		},
 		current: function(id) {
 			var rev = id && this.get(parseInt(id)) || this.last();
-			Article.set({current: rev});
-			return rev;
+			if(rev) {
+				Article.set({current: rev});
+				return rev;
+			}
 		}
 	});
 
@@ -1988,7 +2042,7 @@ define(["jquery",
 			this.row(['span-two-thirds', 'span-one-third']);
 			var loc = Article.get('location');
 			if(loc && loc.has('latitude')) {
-				if(!App.skim) {
+				if(!App.skim && !App.group) {
 					this.renderMap(loc);
 				}
 			} else {
@@ -2015,6 +2069,69 @@ define(["jquery",
 				}
 			});
 			this.display("Missing event requirements", missed_req.length ? missed_req.join(', ') : "None, this article seems to treat an event.");
+			return this;
+		}
+	});
+
+	window.MarkerView = SectionView.extend({
+		id: "distribution",
+		title: "Origins",
+		subtitle: "Geographic origins of articles",
+		renderMap: function(rows) {
+			var myOptions = {
+				zoom: 2,
+				zoomControl: false,
+				scrollwheel: false,
+				draggable: false,
+				disableDefaultUI: true,
+				center: new google.maps.LatLng(10, 0),
+				mapTypeId: google.maps.MapTypeId.ROADMAP
+			};
+			var map = new google.maps.Map(this.div(_.uniqueId("geoChart"), "gmap"), myOptions);
+			var myLatlng, myMarker;
+			_.each(rows, function(r) {
+				myLatlng = new google.maps.LatLng(r[0], r[1]);
+				myMarker = new google.maps.Marker({
+					map: map,
+						 flat: true,
+						 icon: "http://154596.webhosting56.1blu.de/reddot.png",
+					position: myLatlng
+				});
+			});
+			/*
+			var table = new google.visualization.DataTable();
+			table.addColumn('number', 'Latitude');
+			table.addColumn('number', 'Longitude');
+			table.addColumn('number', 'Count');
+			if(rows && rows.length) {
+				table.addRows(rows);
+				var geoChart = new google.visualization.GeoChart(this.div(_.uniqueId("geoChart")));
+				var options = {
+					displayMode: 'markers'
+				};
+				geoChart.draw(table, options);
+			}
+			*/
+		},
+		render: function() {
+			var results = Group.filter(function(r) {
+				return r.get('analyzed');
+			});
+			if(_.size(results)) {
+				this.row(['span16']);
+				var markers = _.map(results, function(r) {
+					return [r.get('latitude'), r.get('longitude'), 1];
+				});
+				this.renderMap(markers);
+				this.column(2);
+				/*
+				var total = _.sum(geoCount, function(c){return c[1]});
+				this.textarea('Distribution by country <br/>({0} contributions from {1} countries)'.format(total, _.size(geoCount)), geoCount.join('\n'));
+				if(Article.has('sig_dist')) {
+					this.display("Signature distance", "{0} km".format(Article.get('sig_dist').toFixed(3)));
+				}
+				*/
+			}
 			return this;
 		}
 	});
@@ -2110,11 +2227,11 @@ define(["jquery",
 			var id = _.uniqueId("box");
 			var ct = this.div(id);
 			var w = 120,
-				h = 240,
+				h = 360,
 				m = [10, 50, 20, 50]; // top right bottom left
 
 			var chart = d3.chart.box()
-				.whiskers(iqr(2))
+				.whiskers(iqr(1.5))
 				.width(w - m[1] - m[3])
 				.height(h - m[0] - m[2]);
 			
@@ -2436,9 +2553,9 @@ define(["jquery",
 					chart = this.subview(GoogleChartView);
 					cols = [
 						{label: 'Hypothesis', type: 'string'},
-						{label: 'Not an event article', type: 'number'},
-						{label: 'Not qualified', type: 'number'},
-						{label: 'Qualified', type: 'number'}
+						//{label: 'Not an event article', type: 'number'},
+						{label: 'Qualified', type: 'number'},
+						{label: 'Not qualified', type: 'number'}
 					];
 					rows = [];
 					var func, not_qualified, qualified;
@@ -2453,11 +2570,16 @@ define(["jquery",
 								not_qualified++;
 							}
 						});
-						rows.push([func.toUpperCase(), total - qualified - not_qualified, not_qualified, qualified]);
+						rows.push([
+							func.toUpperCase(), 
+							//total - qualified - not_qualified, 
+							qualified,
+							not_qualified
+						]);
 					});
 					config = {
 						isStacked: true, 
-						legend: {position: 'none'},
+						legend: {position: 'top'},
 						title: 'Articles qualified: {0} ({1}% of all)'.format(count, (all ? count * 100 / all : 0).toFixed(1))
 					};
 					chart.renderTable('ColumnChart', cols, rows, config);
@@ -2471,12 +2593,13 @@ define(["jquery",
 					{label: 'Hypothesis', type: 'string'},
 					{label: 'Articles', type: 'number'}
 				];
-				var rejections = {}, reqs;
+				var rejections = {}, reqs, key;
 				_.each(_.difference(analyzed, relevant), function(a) {
 					reqs = a.get('requirements');
 					_.each(reqs, function(value, req) { 
 						if(!value) {
-							rejections[req] = 1 + (rejections[req] || 0);
+							key = req.match(/b\/l/) ? "blacklisted" : req;
+							rejections[key] = 1 + (rejections[key] || 0);
 						}
 					});
 				});
@@ -2484,8 +2607,12 @@ define(["jquery",
 				_.each(rejections, function(num, req) {
 					rows.push([req, num]);
 				});
+				rows = _.sortBy(rows, function(arr) {
+					return arr[1];
+				});
+				rows.reverse();
 				config = {
-					hAxis: {slantedText: false}, 
+					hAxis: {slantedText: false, showTextEvery: 1}, 
 					legend: {position: 'none'},
 					title: 'Distribution of articles by missed requirements'
 				};
@@ -2525,7 +2652,10 @@ define(["jquery",
 				{label: 'Days', type: 'string'},
 				{label: 'Articles', type: 'number'}
 			];
-			chart.renderTable('ColumnChart', cols, rows);
+			var config = {
+					legend: {position: 'none'}
+			};
+			chart.renderTable('ColumnChart', cols, rows, config);
 		},
 		h2: function(results, title, subtitle, total) {
 			var rows = _.map(results, function(r) {
@@ -2549,13 +2679,16 @@ define(["jquery",
 				{label: 'Date', type: 'date'},
 				{label: 'Delay (d)', type: 'number'}
 			];
-			chart.renderTable('ScatterChart', cols, rows);
+			var config = {
+				legend: {position: 'none'}
+			};
+			chart.renderTable('ScatterChart', cols, rows, config);
 		},
 		h3: function(results, title, subtitle, total) {
 			var langs = _.invoke(results, 'get', 'first_lang');
 			var english = _.filter(langs, function(l) {return l == 'en'});
 			var ratio = langs.length ? english.length / langs.length : 0;
-			var text =  "{0} ({1}%)".format(ratio > 0.5 ? 'True' : 'False', Math.round(ratio * 100));
+			var text =  "{0} ({1}% of {2} articles)".format(ratio > 0.5 ? 'True' : 'False', Math.round(ratio * 100), langs.length);
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 			this.display('Articles were created in the English Wikipedia first', text);
 			this.column(2);
@@ -2572,7 +2705,10 @@ define(["jquery",
 				{label: 'Language', type: 'string'},
 				{label: 'Articles', type: 'number'}
 			];
-			chart.renderTable('ColumnChart', cols, rows);
+			var config = {
+				legend: {position: 'none'}
+			};
+			chart.renderTable('ColumnChart', cols, rows, config);
 		},
 		h4: function(results, title, subtitle, total) {
 			var residents = _.filter(results, function(r) {
@@ -2580,13 +2716,12 @@ define(["jquery",
 			});
 			var ratio = results.length ? residents.length / results.length : 0;
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
-			var text =  "{0} ({1}% of articles with located creator)".format(ratio > 0.5 ? 'True' : 'False', Math.round(ratio * 100));
+			var text =  "{0} ({1}% of {2} articles with located creator)".format(ratio > 0.5 ? 'True' : 'False', Math.round(ratio * 100), results.length);
 			this.display("Articles were created by a resident", text);
 			this.column(2);
 			var rows = [
 				['Same country', residents.length],
-				['Different country', results.length - residents.length],
-				['Unknown', total - results.length]
+				['Different country', results.length - residents.length]
 			];
 			var chart = this.subview(GoogleChartView);
 			var cols = [
@@ -2597,12 +2732,20 @@ define(["jquery",
 		},
 		h5: function(results, title, subtitle, total) {
 			var values = _.map(results, function(e) {
-				return e.get('early_author_count') ? e.get('early_anon_count') / e.get('early_author_count') : 0;
+				return e.get('early_anon_count') / e.get('early_author_count');
 			});
 
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 			this.display("Anonymous contributions in the beginning", "{0} articles have contributions in the beginning.".format(results.length));
 			if(values.length) {
+				var stats = dStats(values);
+				this.display("Central tendency and variance", 
+						"Mean: {0}, median: {1}, stddev: {2}".format(
+							stats.mean.toFixed(2),
+							stats.median.toFixed(2),
+							stats.stddev.toFixed(2)
+						)
+					);
 				this.column(2);
 				var chart = this.subview(BoxChartView);
 				chart.render(values);
@@ -2616,6 +2759,14 @@ define(["jquery",
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 			this.display("Local contributions in the beginning", "{0} articles have located contributions in the beginning.".format(results.length));
 			if(values.length) {
+				var stats = dStats(values);
+				this.display("Central tendency and variance", 
+						"Mean: {0}, median: {1}, stddev: {2}".format(
+							stats.mean.toFixed(2),
+							stats.median.toFixed(2),
+							stats.stddev.toFixed(2)
+						)
+					);
 				this.column(2);
 				var chart = this.subview(BoxChartView);
 				chart.render(values);
@@ -2629,6 +2780,14 @@ define(["jquery",
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 			this.display("Correlation between frequency of anonymous contributions and article age", "{0} articles have contributions.".format(results.length));
 			if(values.length) {
+				var stats = dStats(values);
+				this.display("Central tendency and variance", 
+						"Mean: {0}, median: {1}, stddev: {2}".format(
+							stats.mean.toFixed(2),
+							stats.median.toFixed(2),
+							stats.stddev.toFixed(2)
+						)
+					);
 				this.column(2);
 				var chart = this.subview(BoxChartView);
 				chart.render(values);
@@ -2642,6 +2801,14 @@ define(["jquery",
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 			this.display("Correlation between frequency of local contributions and article age", "{0} articles have enough located contributions.".format(results.length));
 			if(values.length) {
+				var stats = dStats(values);
+				this.display("Central tendency and variance", 
+						"Mean: {0}, median: {1}, stddev: {2}".format(
+							stats.mean.toFixed(2),
+							stats.median.toFixed(2),
+							stats.stddev.toFixed(2)
+						)
+					);
 				this.column(2);
 				var chart = this.subview(BoxChartView);
 				chart.render(values);
@@ -2650,15 +2817,25 @@ define(["jquery",
 		h9: function(results, title, subtitle) {
 			var values = _.map(results, function(res) {
 				var ratios = _.map(res.get('later_sig_dist_ratios'), function(arr) {
-					return arr[2] * 100;
+					return arr[2];
 				});
 				var stats = dStats(ratios);
 				return stats.mean;
 			});
+			var outliers = dStats(values).outliers(4);
+			values = _.difference(values, outliers);
 
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 			this.display("Means of e.surv ratios, baseline = 100, lower values suggest local contributions prevailed ", "{0} articles have enough located contributions.".format(results.length));
 			if(values.length) {
+				var stats = dStats(values);
+				this.display("Central tendency and variance", 
+						"Mean: {0}, median: {1}, stddev: {2}".format(
+							stats.mean.toFixed(2),
+							stats.median.toFixed(2),
+							stats.stddev.toFixed(2)
+						)
+					);
 				this.column(2);
 				var chart = this.subview(BoxChartView);
 				chart.render(values);
@@ -2667,15 +2844,25 @@ define(["jquery",
 		h10: function(results, title, subtitle) {
 			var values = _.map(results, function(res) {
 				var ratios = _.map(res.get('later_sig_dist_ratios'), function(arr) {
-					return arr[3] * 100;
+					return arr[3];
 				});
 				var stats = dStats(ratios);
 				return stats.mean;
 			});
+			var outliers = dStats(values).outliers(4);
+			values = _.difference(values, outliers);
 
 			this.row(['span-one-third', 'span-two-thirds'], title, subtitle);
 			this.display("Means of t.surv ratios, baseline = 100, lower values suggest local text prevailed ", "{0} articles have enough located contributions.".format(results.length));
 			if(values.length) {
+				var stats = dStats(values);
+				this.display("Central tendency and variance", 
+						"Mean: {0}, median: {1}, stddev: {2}".format(
+							stats.mean.toFixed(2),
+							stats.median.toFixed(2),
+							stats.stddev.toFixed(2)
+						)
+					);
 				this.column(2);
 				var chart = this.subview(BoxChartView);
 				chart.render(values);
@@ -2744,6 +2931,7 @@ define(["jquery",
 	window.AppView = Backbone.View.extend({
 		el: $("body"),
 		details: true,
+		thorough: false,
 		events: {
 			"click #results": "renderGroup",
 			"click #continue": "continueBtn",
@@ -2805,6 +2993,8 @@ define(["jquery",
 				// show current results
 				var gr = new GroupResultsView;
 				gr.render();
+				//var mv = new MarkerView;
+				//mv.render();
 				// buttons
 				this.$analyze.hide();
 				if(Group.length == Group.has('analyzed').length) {
@@ -2867,6 +3057,7 @@ define(["jquery",
 			this.group = !recover || App.group;
 			this.skim = Group.skim;
 			this.input.val(Group.title);
+			this.thorough = this.$special.prop('checked');
 			var todo = Group.filter(function(a) { return !a.has('analyzed'); });
 			var key, result, article;
 			// clear cache from non-group items
